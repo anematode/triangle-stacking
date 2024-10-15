@@ -205,6 +205,7 @@ struct Image {
       float32x4_t xxxx = vdupq_n_f32((float)min_x);
 #endif
 
+      bool reached = false;
       for (int x = min_x; x <= max_x; x++) {
 #ifdef __ARM_NEON__
         float32x4_t result = vfmaq_f32(vfmaq_f32(B, yyyy, A2), xxxx, A1);
@@ -224,7 +225,10 @@ struct Image {
 #endif
 
         if (segs == 0 || segs == 3) {
+          reached = true;
           lambda(x, y);
+        } else if (reached) {
+          break;  // reached end of scan line
         }
 
 #ifdef __ARM_NEON__
