@@ -4,10 +4,10 @@
  *   AVX2 + FMA or ARM NEON
  */
 #include <algorithm>
+#include <numeric>
 #include <vector>
 #include <string>
 #include <iostream>
-#include <numeric>
 #include <omp.h>
 
 // For vectorisation :)
@@ -220,7 +220,7 @@ struct Image {
         result = _mm_fmadd_ps(xxxx, A1, result);
 
         int mask = _mm_movemask_ps(result);
-        int segs = 3 - __builtin_popcount(mask);
+        int segs = 3 - std::popcount(mask);
 #endif
 
         if (segs == 0 || segs == 3) {
@@ -361,8 +361,6 @@ struct Rng {
   }
 };
 
-const int CANDIDATE_COUNT = 100000;
-
 thread_local Rng rng;
 
 /**
@@ -372,11 +370,11 @@ thread_local Rng rng;
  * @param max_area Maximum area
  * @param max_dim Maximum width and height of the triangle
  */
-std::vector<Triangle> generate_random_candidates(float W, float H, float max_area, float max_dim) {
-  std::vector<Triangle> candidates { CANDIDATE_COUNT };
+std::vector<Triangle> generate_random_candidates(size_t iterations, float W, float H, float max_area, float max_dim) {
+  std::vector<Triangle> candidates { iterations };
 
 #pragma omp parallel for
-  for (int i = 0; i < CANDIDATE_COUNT; ++i) {
+  for (int i = 0; i < iterations; ++i) {
     Triangle& can = candidates[i];
     do {
       const float x1 = rng.next(i) * W, y1 = rng.next(i) * H;
@@ -587,7 +585,7 @@ struct Triangulator {
     fclose(f);
   }
 
-  void run_step(int step, bool verbose, bool do_max_area, bool do_max_dim) {
+  void run_step(int step, bool verbose, bool do_max_area, bool do_max_dim, int min_time_ms = 5000) {
     using namespace std::chrono;
 
     float max_area = do_max_area ? assembled.size() * 10.0f / step : FLT_MAX;
@@ -601,58 +599,75 @@ struct Triangulator {
       }
     }
 
-    int W = target.width, H = target.height;
-    std::vector<Triangle> candidates = generate_random_candidates(W, H, max_area, max_dim);
-    std::copy(candidates.begin(), candidates.end(), std::back_inserter(best_from_prev_step));
-    long triangles_evaluated = candidates.size();
-    auto [ resolved, pixels_evaluated ] = evaluate_triangle_batched(candidates, assembled, colour_diff, target);
-    sort_by_best(candidates, resolved);
+    Triangle overall_best;
+    float overall_best_improvement = FLT_MAX;
+    steady_clock::time_point end_time;
+    long triangles_evaluated = 0, pixels_evaluated = 0;
 
-    std::vector<Triangle> ping = std::move(candidates), pong;
+    do {
+      int W = target.width, H = target.height;
+      std::vector<Triangle> candidates = generate_random_candidates(iterations, W, H, max_area, max_dim);
+      std::copy(candidates.begin(), candidates.end(), std::back_inserter(best_from_prev_step));
+      triangles_evaluated += candidates.size();
+      auto [ resolved, this_pixels_evaluated ] = evaluate_triangle_batched(candidates, assembled, colour_diff, target);
+      pixels_evaluated += this_pixels_evaluated;
+      sort_by_best(candidates, resolved);
 
-    Triangle best = ping[0];
-    best.colour = resolved[0].second;
-    float best_improvement = resolved[0].first;
+      std::vector<Triangle> ping = std::move(candidates), pong;
 
-    if (verbose) {
-      std::cout << "Original best-triangle improvement: " << best_improvement << '\n';
-    }
+      Triangle best = ping[0];
+      best.colour = resolved[0].second;
+      float best_improvement = resolved[0].first;
 
-    std::unordered_set already_tried(ping.begin(), ping.end());
-    for (int perturb_step = 0; perturb_step < PERTURBATION_STEPS; ++perturb_step) {
-      ping.resize(PERTURBATION_GENERATION_SIZE);
-      if (perturb_step == 0) {
-        best_from_prev_step = ping;  // save for next stage
+      if (verbose) {
+        std::cout << "Original best-triangle improvement: " << best_improvement << '\n';
       }
 
-      for (const auto& t : ping) {
-        perturb_triangle(t, pong, already_tried);
+      std::unordered_set already_tried(ping.begin(), ping.end());
+      for (int perturb_step = 0; perturb_step < PERTURBATION_STEPS; ++perturb_step) {
+        ping.resize(PERTURBATION_GENERATION_SIZE);
+        if (perturb_step == 0) {
+          best_from_prev_step = ping;  // save for next stage
+        }
+
+        for (const auto& t : ping) {
+          perturb_triangle(t, pong, already_tried);
+        }
+
+        if (pong.empty()) {
+          break;
+        }
+
+        auto [ resolved_, total_pixels ] = evaluate_triangle_batched(pong, assembled, colour_diff, target);
+        triangles_evaluated += pong.size();
+        resolved = std::move(resolved_);
+        sort_by_best(pong, resolved);
+        pixels_evaluated += total_pixels;
+
+        if (best_improvement > resolved[0].first) {
+          best = pong[0];
+          best.colour = resolved[0].second;
+          best_improvement = resolved[0].first;
+        }
+
+        std::swap(ping, pong);
       }
 
-      auto [ resolved_, total_pixels ] = evaluate_triangle_batched(pong, assembled, colour_diff, target);
-      triangles_evaluated += pong.size();
-      resolved = std::move(resolved_);
-      sort_by_best(pong, resolved);
-      pixels_evaluated += total_pixels;
-
-      if (best_improvement < resolved[0].first) {
-        best = pong[0];
-        best.colour = resolved[0].second;
-        best_improvement = resolved[0].first;
+      if (overall_best_improvement > best_improvement) {
+        overall_best = best;
+        overall_best_improvement = best_improvement;
       }
 
-      std::swap(ping, pong);
-    }
+      end_time = steady_clock::now();
+    } while (duration_cast<milliseconds>(end_time - start_time).count() < min_time_ms);
 
-    assembled.draw_triangle(best);
-    triangles.push_back(best);
-
-    steady_clock::time_point end_time = steady_clock::now();
+    assembled.draw_triangle(overall_best);
+    triangles.push_back(overall_best);
 
     if (verbose) {
       long time = duration_cast<microseconds>(end_time - start_time).count();
 
-      std::cout << "Improvement: " << resolved[0].first << '\n';
+      std::cout << "Improvement: " << overall_best_improvement << '\n';
       std::cout << "Pixel evaluation rate: " << (pixels_evaluated / time) << " pixels/us\n";
       std::cout << "Triangle evaluation rate: " << triangles_evaluated / (time / 1000000.0) << " triangles/s\n";
       // std::cout << R"({"type": "triangle", "p0": [)" << best.x1 << ", " << best.y1 << "], \"p1\": [" << best.x2 << ", " << best.y2 << "], \"p2\": [" << best.x3 << ", " << best.y3 << "], \"color\": [" << best.colour.r << ", " << best.colour.g << ", " << best.colour.b << "], \"alpha\": " << best.colour.a << "}\n";
