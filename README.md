@@ -1,0 +1,1 @@
+--save-state pipe.save -i ./pipe/MagrittePipe.jpg --json ./pipe/pipe.json -o ./pipe/final_pipe.png --intermediate pipe/pipe_frames
