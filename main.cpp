@@ -346,7 +346,7 @@ evaluate_triangle_batched(const std::vector<Triangle>& candidates,
     pixel_counts[i] = pixel_count;
   }
 
-  long total_pixels = std::accumulate(pixel_counts.begin(), pixel_counts.end(), 0);
+  long total_pixels = std::accumulate(pixel_counts.begin(), pixel_counts.end(), 0L);
   return { results, total_pixels };
 }
 
