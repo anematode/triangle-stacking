@@ -220,7 +220,7 @@ struct Image {
         result = _mm_fmadd_ps(xxxx, A1, result);
 
         int mask = _mm_movemask_ps(result);
-        int segs = 3 - std::popcount(mask);
+        int segs = 3 - std::popcount((unsigned)mask);
 #endif
 
         if (segs == 0 || segs == 3) {
