@@ -486,11 +486,11 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 #else
 #define LOAD_COMPONENT(img, comp) _mm256_maskload_ps(img.comp.data() + offs, _mm256_castps_si256(valid_mask.mask))
 
-    rrrr = _mm256_add_ps(rrrr, LOAD_COMPONENT(red));
-    gggg = _mm256_add_ps(gggg, LOAD_COMPONENT(blue));
-    bbbb = _mm256_add_ps(bbbb, LOAD_COMPONENT(green));
+    rrrr = _mm256_add_ps(rrrr, LOAD_COMPONENT(colour_diff, red));
+    gggg = _mm256_add_ps(gggg, LOAD_COMPONENT(colour_diff, blue));
+    bbbb = _mm256_add_ps(bbbb, LOAD_COMPONENT(colour_diff, green));
 
-    pixel_count += std::popcount((unsigned) _mm256_movemask_ps(valid_mask));
+    pixel_count += std::popcount((unsigned) _mm256_movemask_ps(valid_mask.mask));
 #endif
   });
 
