@@ -9,6 +9,7 @@
 #include <string>
 #include <iostream>
 #include <omp.h>
+#include <mutex>
 
 // For vectorisation :)
 #ifdef __ARM_NEON__
@@ -327,7 +328,7 @@ struct Image {
         }
 #elif defined(USE_AVX512)
         __mmask16 in_triangle = c1 & c2 & c3;
-        inf.valid_mask = _mm512_mask_cmplt_ps_mask(in_triangle, xxxx, wwww);
+        auto pixels_ok = inf.valid_mask = _mm512_mask_cmplt_ps_mask(in_triangle, xxxx, wwww);
 
         xxxx = _mm512_add_ps(xxxx, increment_x);
         if (!pixels_ok) {
@@ -421,10 +422,10 @@ float bonus(int x, int y) {
 }
 
 #ifdef USE_AVX512
-/**
- * Horizontally add eight floating-point values in v.
- */
-// x = ( x7, x6, x5, x4, x3, x2, x1, x0 )
+float horizontal_add(__m512 x) {
+  return __m512_reduce_add_ps(x);
+}
+#elif !defined(USE_NEON)
 float horizontal_add(__m256 x) {
   const __m128 hiQuad = _mm256_extractf128_ps(x, 1);
   const __m128 loQuad = _mm256_castps256_ps128(x);
@@ -436,10 +437,6 @@ float horizontal_add(__m256 x) {
   const __m128 hi = _mm_shuffle_ps(sumDual, sumDual, 0x1);
   const __m128 sum = _mm_add_ss(lo, hi);
   return _mm_cvtss_f32(sum);
-}
-#elif !defined(USE_NEON)
-float horizontal_add(__m512 x) {
-  return __m512_reduce_add_ps(x);
 }
 #endif
 
@@ -478,9 +475,9 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 
     pixel_count += -vaddvq_u32(valid_mask.mask);
 #elif defined(USE_AVX512)
-#define LOAD_COMPONENT(img, comp) _mm512_maskz_load_ps(img.comp.data() + offs, valid_mask)
+#define LOAD_COMPONENT(img, comp) _mm512_maskz_load_ps(valid_mask, img.comp.data() + offs)
 #define ACCUMULATE_COMPONENT(vec, img, comp) \
-    vec = _mm512_mask_add_ps(vec, vec, _mm512_maskz_load_ps(img.comp.data() + offs, valid_mask))
+    vec = _mm512_mask_add_ps(vec, vec, LOAD_COMPONENT(img, comp))
 
     ACCUMULATE_COMPONENT(rrrr, colour_diff, red);
     ACCUMULATE_COMPONENT(gggg, colour_diff, blue);
@@ -531,11 +528,11 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
   float32x4_t candidate_green = vdupq_n_f32(candidate.colour.g);
   float32x4_t candidate_blue = vdupq_n_f32(candidate.colour.b);
 #else
-  __m##AVX_WIDTH improvement_v = _mm##AVX_WIDTH_setzero_ps();
-  __m##AVX_WIDTH alpha_inv = _mm##AVX_WIDTH_set1_ps(1 - TRI_ALPHA), alpha = _mm##AVX_WIDTH_set1_ps(TRI_ALPHA);
-  __m##AVX_WIDTH candidate_red = _mm##AVX_WIDTH_set1_ps(candidate.colour.r);
-  __m##AVX_WIDTH candidate_green = _mm##AVX_WIDTH_set1_ps(candidate.colour.g);
-  __m##AVX_WIDTH candidate_blue = _mm##AVX_WIDTH_set1_ps(candidate.colour.b);
+  __m##AVX_WIDTH improvement_v = _mm##AVX_WIDTH##_setzero_ps();
+  __m##AVX_WIDTH alpha_inv = _mm##AVX_WIDTH##_set1_ps(1 - TRI_ALPHA), alpha = _mm##AVX_WIDTH##_set1_ps(TRI_ALPHA);
+  __m##AVX_WIDTH candidate_red = _mm##AVX_WIDTH##_set1_ps(candidate.colour.r);
+  __m##AVX_WIDTH candidate_green = _mm##AVX_WIDTH##_set1_ps(candidate.colour.g);
+  __m##AVX_WIDTH candidate_blue = _mm##AVX_WIDTH##_set1_ps(candidate.colour.b);
 #endif
 
   colour_diff.triangle_vectorized_for_each(candidate, [&] (auto info) {
@@ -555,11 +552,11 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 
 #define COMPUTE_COMPONENT(comp) \
     __m##AVX_WIDTH st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
-    __m##AVX_WIDTH result_##comp = _mm##AVX_WIDTH_fmadd_ps(st_##comp, alpha_inv, _mm256_mul_ps(alpha, candidate_##comp)); \
-    __m##AVX_WIDTH new_error_##comp = _mm##AVX_WIDTH_sub_ps(result_##comp, ta_##comp); \
-    __m##AVX_WIDTH old_error_##comp = _mm##AVX_WIDTH_sub_ps(st_##comp, ta_##comp); \
-    improvement_v = _mm##AVX_WIDTH_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
-    improvement_v = _mm##AVX_WIDTH_sub_ps(improvement_v, _mm##AVX_WIDTH_mul_ps(old_error_##comp, old_error_##comp));
+    __m##AVX_WIDTH result_##comp = _mm##AVX_WIDTH##_fmadd_ps(st_##comp, alpha_inv, _mm256_mul_ps(alpha, candidate_##comp)); \
+    __m##AVX_WIDTH new_error_##comp = _mm##AVX_WIDTH##_sub_ps(result_##comp, ta_##comp); \
+    __m##AVX_WIDTH old_error_##comp = _mm##AVX_WIDTH##_sub_ps(st_##comp, ta_##comp); \
+    improvement_v = _mm##AVX_WIDTH##_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
+    improvement_v = _mm##AVX_WIDTH##_sub_ps(improvement_v, _mm##AVX_WIDTH##_mul_ps(old_error_##comp, old_error_##comp));
 #endif
 
     COMPUTE_COMPONENT(red);
