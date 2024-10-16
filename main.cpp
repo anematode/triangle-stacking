@@ -307,7 +307,7 @@ struct Image {
   void triangle_for_each(Triangle tri, L&& lambda) const {
     triangle_vectorized_for_each(tri, [&] (LoadInfo<LOAD_INFO_W> info) {
       for (int i = 0; i < LOAD_INFO_W; i++) {
-        if (info.valid_mask.mask[i]) {
+        if (info.valid_mask.arr[i]) {
           lambda(info.x + i, info.y);
         }
       }
