@@ -236,7 +236,7 @@ struct Image {
       __m256i check(__m256 x, __m256 y) {
         __m256 res = _mm256_fmadd_ps(y, A2, B);
         res = _mm256_fmadd_ps(x, A1, res);
-        return _mm256_srai_epi32(_mm256_castps_si256(res), 31);
+        return res; // (only high bits matter) _mm256_srai_epi32(_mm256_castps_si256(res), 31);
       }
     };
 #endif
@@ -449,12 +449,17 @@ float bonus(int x, int y) {
 /**
  * Horizontally add eight floating-point values in v.
  */
-float horizontal_add(__m256 v) {
-  __m128 hi = _mm256_extractf128_ps(v, 1);
-  __m128 lo = _mm256_castps256_ps128(v);
-  __m128 sum = _mm_add_ps(hi, lo);
-  sum = _mm_hadd_ps(sum, sum);
-  sum = _mm_hadd_ps(sum, sum);
+// x = ( x7, x6, x5, x4, x3, x2, x1, x0 )
+float horizontal_add(__m256 x) {
+  const __m128 hiQuad = _mm256_extractf128_ps(x, 1);
+  const __m128 loQuad = _mm256_castps256_ps128(x);
+  const __m128 sumQuad = _mm_add_ps(loQuad, hiQuad);
+  const __m128 loDual = sumQuad;
+  const __m128 hiDual = _mm_movehl_ps(sumQuad, sumQuad);
+  const __m128 sumDual = _mm_add_ps(loDual, hiDual);
+  const __m128 lo = sumDual;
+  const __m128 hi = _mm_shuffle_ps(sumDual, sumDual, 0x1);
+  const __m128 sum = _mm_add_ss(lo, hi);
   return _mm_cvtss_f32(sum);
 }
 #endif
@@ -571,7 +576,7 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 #undef COMPUTE_COMPONENT
 
 #ifndef __ARM_NEON__
-    improvement_v = _mm256_blendv_ps(initial_improvement, improvement_v, valid_mask.mask);
+    improvement_v = _mm256_or_ps(_mm256_andnot_ps(valid_mask.mask, initial_improvement), _mm256_and_ps(valid_mask.mask, improvement_v));
 #endif
   });
 
@@ -856,7 +861,7 @@ struct Triangulator {
     fclose(f);
   }
 
-  void run_step(int step, bool verbose, bool do_max_area, bool do_max_dim, int min_time_ms = 5000) {
+  void run_step(int step, bool verbose, bool do_max_area, bool do_max_dim, int min_time_ms) {
     using namespace std::chrono;
 
     float max_area = do_max_area ? assembled.size() * 10.0f / step : FLT_MAX;
@@ -980,6 +985,7 @@ int main(int argc, char **argv) {
   int max_threads = omp_get_max_threads();
   int hardware_conc = std::thread::hardware_concurrency();
   int threads = std::min(hardware_conc, max_threads);
+  int min_time = 1000;
 
   app.add_option("--save-state", save_state_file, "Save state file")->required();
   app.add_option("-i,--input", input_file, "Input file")->required();
@@ -989,6 +995,7 @@ int main(int argc, char **argv) {
   app.add_option("--iterations", iterations_per_step, "Iterations per step");
   app.add_option("--steps", steps, "Number of steps");
   app.add_option("-t,--num_threads", threads, "Number of processing threads");
+  app.add_option("--min-time", min_time, "Minimum time per step in milliseconds");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -1025,7 +1032,7 @@ int main(int argc, char **argv) {
   steady_clock::time_point start_time = steady_clock::now();
   int step;
   while ((step = triangulator->triangles.size()) < triangulator->steps) {
-    triangulator->run_step(step, true, true, false);
+    triangulator->run_step(step, true, true, false, min_time);
     std::cout << triangulator->summarise(false);
 
     if (!intermediate.empty()) {
