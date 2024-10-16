@@ -162,7 +162,7 @@ struct Image {
 
   void compute_channels() {
     auto fill = [&] (std::vector<float>& target, auto&& lambda) {
-      target.resize(size() + 16 /* padding */);
+      target.resize(size() + 32 /* padding */);
       for (int i = 0; i < size(); i++) {
         target[i] = lambda(colours[i]);
       }
@@ -582,7 +582,7 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 #undef COMPUTE_COMPONENT
 
 #ifdef USE_AVX512
-    improvement_v = _mm512_mask_add_ps(initial_improvement, valid_mask, improvement_v, improvement_v);
+    improvement_v = _mm512_mask_blend_ps(valid_mask, initial_improvement, improvement_v);
 #elif !defined(USE_NEON)
     improvement_v = _mm256_or_ps(_mm256_andnot_ps(valid_mask.mask, initial_improvement), _mm256_and_ps(valid_mask.mask, improvement_v));
 #endif
