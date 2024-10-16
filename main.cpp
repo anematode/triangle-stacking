@@ -1020,12 +1020,12 @@ int main(int argc, char **argv) {
 
   triangulator = new Triangulator { std::move(input_file) };
 
+  if (fs::exists(save_state_file))
+    triangulator->load_save_state(save_state_file);
+
   triangulator->steps = steps;
   triangulator->iterations = iterations_per_step;
   triangulator->parallelism = threads;
-
-  if (fs::exists(save_state_file))
-    triangulator->load_save_state(save_state_file);
 
   std::cout << triangulator->summarise(true);
 
