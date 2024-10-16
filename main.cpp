@@ -236,7 +236,7 @@ struct Image {
       __m256i check(__m256 x, __m256 y) {
         __m256 res = _mm256_fmadd_ps(y, A2, B);
         res = _mm256_fmadd_ps(x, A1, res);
-        return _mm256_castps_si256(res); // (only high bits matter) _mm256_srai_epi32(_mm256_castps_si256(res), 31);
+        return _mm256_srai_epi32(_mm256_castps_si256(res), 31);
       }
     };
 #endif
