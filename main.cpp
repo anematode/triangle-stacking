@@ -409,7 +409,7 @@ struct Image {
     return std::clamp((int)(std::pow(b, (1/2.2)) * 255 + 0.5), 0, 255);
   }
 
-  void write_png(const std::string& path) {
+  void write_png(const std::string& path) const {
     std::vector<unsigned char> data(size() * 4);
 
     for (int i = 0; i < size(); i++) {
@@ -1037,7 +1037,14 @@ int main(int argc, char **argv) {
 
     if (!intermediate.empty()) {
       auto filename = "result" + std::to_string(step) + ".png";
-      triangulator->assembled.write_png(intermediate + (intermediate[intermediate.size() - 1] == '/' ? "" : "/") + filename);
+      filename = intermediate + (intermediate[intermediate.size() - 1] == '/' ? "" : "/") + filename;
+
+      // Write out the PNG on a separate thread so the rest of the cores can keep cookin'
+      Image to_write = triangulator->assembled;
+      std::thread write_thread { [to_write = std::move(to_write), filename = std::move(filename)] () {
+        to_write.write_png(filename);
+      } };
+      write_thread.detach();
     }
 
     if (!save_state_file.empty())
