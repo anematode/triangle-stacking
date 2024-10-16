@@ -527,12 +527,18 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
   float32x4_t candidate_red = vdupq_n_f32(candidate.colour.r);
   float32x4_t candidate_green = vdupq_n_f32(candidate.colour.g);
   float32x4_t candidate_blue = vdupq_n_f32(candidate.colour.b);
+#elif defined(USE_AVX512)
+  __m512 improvement_v = _mm512_setzero_ps();
+  __m512 alpha_inv = _mm512_set1_ps(1 - TRI_ALPHA), alpha = _mm512_set1_ps(TRI_ALPHA);
+  __m512 candidate_red = _mm512_set1_ps(candidate.colour.r);
+  __m512 candidate_green = _mm512_set1_ps(candidate.colour.g);
+  __m512 candidate_blue = _mm512_set1_ps(candidate.colour.b);
 #else
-  __m##AVX_WIDTH improvement_v = _mm##AVX_WIDTH##_setzero_ps();
-  __m##AVX_WIDTH alpha_inv = _mm##AVX_WIDTH##_set1_ps(1 - TRI_ALPHA), alpha = _mm##AVX_WIDTH##_set1_ps(TRI_ALPHA);
-  __m##AVX_WIDTH candidate_red = _mm##AVX_WIDTH##_set1_ps(candidate.colour.r);
-  __m##AVX_WIDTH candidate_green = _mm##AVX_WIDTH##_set1_ps(candidate.colour.g);
-  __m##AVX_WIDTH candidate_blue = _mm##AVX_WIDTH##_set1_ps(candidate.colour.b);
+  __m256 improvement_v = _mm256_setzero_ps();
+  __m256 alpha_inv = _mm256_set1_ps(1 - TRI_ALPHA), alpha = _mm256_set1_ps(TRI_ALPHA);
+  __m256 candidate_red = _mm256_set1_ps(candidate.colour.r);
+  __m256 candidate_green = _mm256_set1_ps(candidate.colour.g);
+  __m256 candidate_blue = _mm256_set1_ps(candidate.colour.b);
 #endif
 
   colour_diff.triangle_vectorized_for_each(candidate, [&] (auto info) {
@@ -547,16 +553,26 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
     float32x4_t old_error_##comp = vsubq_f32(st_##comp, ta_##comp); \
     improvement_v = vfmaq_f32(improvement_v, new_error_##comp, new_error_##comp); \
     improvement_v = vfmsq_f32(improvement_v, old_error_##comp, old_error_##comp);
+#elif defined(USE_AVX512)
+    __m512 initial_improvement = improvement_v;
+
+    #define COMPUTE_COMPONENT(comp) \
+    __m512 st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
+    __m512 result_##comp = _mm512_fmadd_ps(st_##comp, alpha_inv, _mm512_mul_ps(alpha, candidate_##comp)); \
+    __m512 new_error_##comp = _mm512_sub_ps(result_##comp, ta_##comp); \
+    __m512 old_error_##comp = _mm512_sub_ps(st_##comp, ta_##comp); \
+    improvement_v = _mm512_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
+    improvement_v = _mm512_sub_ps(improvement_v, _mm512_mul_ps(old_error_##comp, old_error_##comp));
 #else
     __m256 initial_improvement = improvement_v;
 
 #define COMPUTE_COMPONENT(comp) \
-    __m##AVX_WIDTH st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
-    __m##AVX_WIDTH result_##comp = _mm##AVX_WIDTH##_fmadd_ps(st_##comp, alpha_inv, _mm256_mul_ps(alpha, candidate_##comp)); \
-    __m##AVX_WIDTH new_error_##comp = _mm##AVX_WIDTH##_sub_ps(result_##comp, ta_##comp); \
-    __m##AVX_WIDTH old_error_##comp = _mm##AVX_WIDTH##_sub_ps(st_##comp, ta_##comp); \
-    improvement_v = _mm##AVX_WIDTH##_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
-    improvement_v = _mm##AVX_WIDTH##_sub_ps(improvement_v, _mm##AVX_WIDTH##_mul_ps(old_error_##comp, old_error_##comp));
+    __m256 st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
+    __m256 result_##comp = _mm256_fmadd_ps(st_##comp, alpha_inv, _mm256_mul_ps(alpha, candidate_##comp)); \
+    __m256 new_error_##comp = _mm256_sub_ps(result_##comp, ta_##comp); \
+    __m256 old_error_##comp = _mm256_sub_ps(st_##comp, ta_##comp); \
+    improvement_v = _mm256_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
+    improvement_v = _mm256_sub_ps(improvement_v, _mm256_mul_ps(old_error_##comp, old_error_##comp));
 #endif
 
     COMPUTE_COMPONENT(red);
