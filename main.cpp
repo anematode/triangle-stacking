@@ -115,6 +115,28 @@ struct std::hash<Triangle> {
   }
 };
 
+template <int N>
+struct LoadInfo {
+  int x, y;
+
+  union {
+    int arr[N];
+#ifdef __ARM_NEON__
+    uint32x4_t mask;
+#else
+    __m256 mask;
+#endif
+  } valid_mask;
+
+  /**
+   * Offset into the pixels array associated with the base of this load.
+   * @param width Width of the image
+   */
+  int offset(int width) {
+    return y * width + x;
+  }
+};
+
 struct Image {
   int width{};
   int height{};
@@ -158,9 +180,134 @@ struct Image {
     memcpy( colours.data(), result, size() * sizeof(Colour));
   }
 
+  static constexpr int LOAD_INFO_W =
+#ifdef __ARM_NEON__
+    4
+#else
+    8
+#endif
+  ;
+
+  template <typename L>
+  requires std::invocable<L, LoadInfo<LOAD_INFO_W>>
+  void triangle_vectorized_for_each(Triangle tri, L&& lambda) const {
+    auto [ x1, y1, x2, y2, x3, y3, _colour ] = tri;
+
+    int min_x = std::min({ tri.x1, tri.x2, tri.x3 });
+    int max_x = std::max({ tri.x1, tri.x2, tri.x3 });
+    int min_y = std::min({ tri.y1, tri.y2, tri.y3 });
+    int max_y = std::max({ tri.y1, tri.y2, tri.y3 });
+
+    min_x = std::clamp(min_x, 0, width - 1);
+    max_x = std::clamp(max_x, 0, width - 1);
+    min_y = std::clamp(min_y, 0, height - 1);
+    max_y = std::clamp(max_y, 0, height - 1);
+
+    // Orient the triangle ccw
+    if ((x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1) < 0) {
+      std::swap(x2, x3);
+      std::swap(y2, y3);
+    }
+
+#ifdef __ARM_NEON__
+    struct HalfPlaneCheck {
+      float32x4_t A1, A2, B;
+
+      HalfPlaneCheck(float x1, float y1, float x2, float y2) {
+        A1 = vdupq_n_f32(y2 - y1);
+        A2 = vdupq_n_f32(x1 - x2);
+        B = vdupq_n_f32(y1 * (x2 - x1) - x1 * (y2 - y1));
+      }
+
+      uint32x4_t check(float32x4_t x, float32x4_t y) {
+        return (uint32x4_t)vshrq_n_s32(vreinterpretq_f32_s32(vfmaq_f32(vfmaq_f32(B, y, A2), x, A1)), 31);
+      }
+    };
+#else
+    struct HalfPlaneCheck {
+      __m256 A1, A2, B;
+
+      HalfPlaneCheck(float x1, float y1, float x2, float y2) {
+        A1 = _mm256_set1_ps(y2 - y1);
+        A2 = _mm256_set1_ps(x1 - x2);
+        B = _mm256_set1_ps(y1 * (x2 - x1) - x1 * (y2 - y1));
+      }
+
+      __m256i check(__m256 x, __m256 y) {
+        __m256 res = _mm256_fmadd_ps(y, A2, B);
+        res = _mm256_fmadd_ps(x, A1, res);
+        return _mm256_srai_epi32(_mm256_castps_si256(res), 31);
+      }
+    };
+#endif
+
+    HalfPlaneCheck check1(x1, y1, x2, y2);
+    HalfPlaneCheck check2(x2, y2, x3, y3);
+    HalfPlaneCheck check3(x3, y3, x1, y1);
+
+    float x_offset[LOAD_INFO_W];
+    std::iota(x_offset, x_offset + LOAD_INFO_W, 0.0);
+
+#ifdef __ARM_NEON__
+    float32x4_t increment_x = vdupq_n_f32((float)LOAD_INFO_W);
+    float32x4_t xxxx_min = vaddq_f32(vdupq_n_f32((float)min_x), vld1q_f32(x_offset));
+    float32x4_t wwww = vdupq_n_f32((float)width);
+#else
+    __m256 increment_x = _mm256_set1_ps(LOAD_INFO_W);
+    __m256 xxxx_min = _mm256_add_ps(_mm256_set1_ps((float)min_x), _mm256_loadu_ps(x_offset));
+    __m256 wwww = _mm256_set1_ps((float)width);
+#endif
+
+    for (int y = min_y; y <= max_y; y++) {
+#ifdef __ARM_NEON__
+      float32x4_t yyyy = vdupq_n_f32((float)y);
+      float32x4_t xxxx = xxxx_min;
+#else
+      __m256 yyyy = _mm256_set1_ps((float)y);
+      __m256 xxxx = xxxx_min;
+#endif
+      for (int x = min_x; x <= max_x; x += LOAD_INFO_W) {
+        auto c1 = check1.check(xxxx, yyyy);
+        auto c2 = check2.check(xxxx, yyyy);
+        auto c3 = check3.check(xxxx, yyyy);
+
+        LoadInfo<LOAD_INFO_W> inf{};
+        inf.x = x;
+        inf.y = y;
+
+#ifdef __ARM_NEON__
+        uint32x4_t in_triangle = vandq_u32(vandq_u32(c1, c2), c3);
+        uint32x4_t within_width = vcltq_f32(xxxx, wwww);
+
+        inf.valid_mask.mask = vandq_u32(in_triangle, within_width);
+
+        xxxx = vaddq_f32(xxxx, increment_x);
+#else
+        __m256 in_triangle = _mm256_castsi256_ps(_mm256_and_si256(_mm256_and_si256(c1, c2), c3));
+        __m256 within_width = _mm256_cmp_ps(xxxx, wwww, _CMP_LT_OQ);
+
+        inf.valid_mask.mask = _mm256_and_ps(in_triangle, within_width);
+
+        xxxx = _mm256_add_ps(xxxx, increment_x);
+#endif
+
+        lambda(inf);
+      }
+    }
+  }
+
   template <typename L>
   requires std::invocable<L, int, int>
   void triangle_for_each(Triangle tri, L&& lambda) const {
+    /*triangle_vectorized_for_each(tri, [&] (LoadInfo<LOAD_INFO_W> info) {
+      for (int i = 0; i < LOAD_INFO_W; i++) {
+        if (info.valid_mask[i]) {
+          lambda(info.x + i, info.y);
+        }
+      }
+    });
+    return;*/
+
     auto x1 = tri.x1, y1 = tri.y1, x2 = tri.x2, y2 = tri.y2, x3 = tri.x3, y3 = tri.y3;
 
     int min_x = std::min({ tri.x1, tri.x2, tri.x3 });
@@ -292,6 +439,20 @@ float bonus(int x, int y) {
   return 1.0;
 }
 
+#ifndef __ARM_NEON__
+/**
+ * Horizontally add eight floating-point values in v.
+ */
+float horizontal_add(__m256 v) {
+  __m128 hi = _mm256_extractf128_ps(v, 1);
+  __m128 lo = _mm256_castps256_ps128(v);
+  __m128 sum = _mm_add_ps(hi, lo);
+  sum = _mm_hadd_ps(sum, sum);
+  sum = _mm_hadd_ps(sum, sum);
+  return _mm_cvtss_f32(sum);
+}
+#endif
+
 // target = current * (1 - a) + src * a
 // Fix a, want to minimize MSE of transparent triangle
 //  src = (sum_ij(target - current * (1 - a)) / a) / (NUM PIXELS)
@@ -302,10 +463,53 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
   Colour avg_diff = { 1, 1, 1, 1 };
   int pixel_count = 0;
 
+#if 1
+#ifdef __ARM_NEON__
+  float32x4_t rrrr = vdupq_n_f32(0);
+  float32x4_t gggg = vdupq_n_f32(0);
+  float32x4_t bbbb = vdupq_n_f32(0);
+#else
+  __m256 rrrr = _mm256_setzero_ps(), gggg = _mm256_setzero_ps(), bbbb = _mm256_setzero_ps();
+#endif
+
+  colour_diff.triangle_vectorized_for_each(candidate, [&] (auto info) {
+    auto [ x, y, valid_mask ] = info;
+    int offs = y * colour_diff.width + x;
+
+#ifdef __ARM_NEON__
+#define LOAD_COMPONENT(img, comp) vreinterpretq_u32_f32(vandq_u32(valid_mask.mask, vreinterpretq_f32_u32(vld1q_f32(img.comp.data() + offs))))
+    rrrr = vaddq_f32(rrrr, LOAD_COMPONENT(colour_diff, red));
+    gggg = vaddq_f32(gggg, LOAD_COMPONENT(colour_diff, blue));
+    bbbb = vaddq_f32(bbbb, LOAD_COMPONENT(colour_diff, green));
+
+    pixel_count += -vaddvq_u32(valid_mask.mask);
+#else
+#define LOAD_COMPONENT(comp) _mm256_maskload_ps(colour_diff.comp.data() + offs, _mm256_castps_si256(valid_mask))
+
+    rrrr = _mm256_add_ps(rrrr, LOAD_COMPONENT(red));
+    gggg = _mm256_add_ps(gggg, LOAD_COMPONENT(blue));
+    bbbb = _mm256_add_ps(bbbb, LOAD_COMPONENT(green));
+
+    pixel_count += std::popcount((unsigned) _mm256_movemask_ps(valid_mask));
+#endif
+  });
+
+#ifdef __ARM_NEON__
+  avg_diff.r = vaddvq_f32(rrrr);
+  avg_diff.g = vaddvq_f32(gggg);
+  avg_diff.b = vaddvq_f32(bbbb);
+#else
+  avg_diff.r = horizontal_add(rrrr);
+  avg_diff.g = horizontal_add(gggg);
+  avg_diff.b = horizontal_add(bbbb);
+#endif
+
+#else
   colour_diff.triangle_for_each(candidate, [&] (int x, int y) {
     avg_diff = avg_diff + colour_diff(x, y);
     pixel_count++;
   });
+#endif
 
   if (pixel_count == 0) {
     return { 0, { 0, 0, 0, TRI_ALPHA }, 0 };
@@ -315,6 +519,57 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
   avg_diff.a = TRI_ALPHA;
   candidate.colour = avg_diff;
 
+#if 1
+#ifdef __ARM_NEON__
+  float32x4_t improvement_v = vdupq_n_f32(0);
+  float32x4_t alpha_inv = vdupq_n_f32(1 - TRI_ALPHA), alpha = vdupq_n_f32(TRI_ALPHA);
+  float32x4_t candidate_red = vdupq_n_f32(candidate.colour.r);
+  float32x4_t candidate_green = vdupq_n_f32(candidate.colour.g);
+  float32x4_t candidate_blue = vdupq_n_f32(candidate.colour.b);
+#else
+  __m256 improvement_v = _mm256_setzero_ps();
+  __m256 alpha_inv = _mm256_set1_ps(1 - TRI_ALPHA), alpha = _mm256_set1_ps(TRI_ALPHA);
+  __m256 candidate_red = _mm256_set1_ps(candidate.colour.r);
+  __m256 candidate_green = _mm256_set1_ps(candidate.colour.g);
+  __m256 candidate_blue = _mm256_set1_ps(candidate.colour.b);
+  __m256 sign_bit = _mm256_set1_ps(-0.0f);
+#endif
+
+  colour_diff.triangle_vectorized_for_each(candidate, [&] (auto info) {
+    auto [ x, y, valid_mask ] = info;
+    int offs = y * colour_diff.width + x;
+
+#ifdef __ARM_NEON__
+#define COMPUTE_COMPONENT(comp) \
+    float32x4_t st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
+    float32x4_t result_##comp = vfmaq_f32(vmulq_f32(alpha, candidate_##comp), st_##comp, alpha_inv); \
+    float32x4_t new_error_##comp = vsubq_f32(result_##comp, ta_##comp); \
+    float32x4_t old_error_##comp = vsubq_f32(st_##comp, ta_##comp); \
+    improvement_v = vfmaq_f32(improvement_v, new_error_##comp, new_error_##comp); \
+    improvement_v = vfmsq_f32(improvement_v, old_error_##comp, old_error_##comp);
+#else
+#define COMPUTE_COMPONENT(comp) \
+    __m256 st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
+    __m256 result_##comp = _mm256_fmadd_ps(alpha, candidate_##comp, _mm256_mul_ps(st_##comp, alpha_inv)); \
+    __m256 new_error_##comp = _mm256_sub_ps(result_##comp, ta_##comp); \
+    __m256 old_error_##comp = _mm256_sub_ps(st_##comp, ta_##comp); \
+    improvement_v = _mm256_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
+    improvement_v = _mm256_xor_ps(sign_bit, _mm256_fmsub_ps(old_error_##comp, old_error_##comp, improvement_v));
+#endif
+
+    COMPUTE_COMPONENT(red);
+    COMPUTE_COMPONENT(blue);
+    COMPUTE_COMPONENT(green);
+
+#undef COMPUTE_COMPONENT
+  });
+
+#ifdef __ARM_NEON__
+  float improvement = vaddvq_f32(improvement_v);
+#else
+  float improvement = horizontal_add(improvement_v);
+#endif
+#else
   float improvement = 0;
   colour_diff.triangle_for_each(candidate, [&] (int x, int y) {
     Colour result = start(x, y) * (1 - TRI_ALPHA) + candidate.colour * TRI_ALPHA;
@@ -322,6 +577,7 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
     Colour old_error = start(x, y) - target(x, y);
     improvement += (len(new_error) - len(old_error));
   });
+#endif
 
   return { improvement, avg_diff, pixel_count };
 }
@@ -602,6 +858,10 @@ struct Triangulator {
         colour_diff(x, y) = (target(x, y) - assembled(x, y) * (1 - TRI_ALPHA)) * (1.0 / TRI_ALPHA);
       }
     }
+
+    colour_diff.compute_channels();
+    assembled.compute_channels();
+    target.compute_channels();
 
     Triangle overall_best;
     float overall_best_improvement = FLT_MAX;
