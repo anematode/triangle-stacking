@@ -484,7 +484,7 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 
     pixel_count += -vaddvq_u32(valid_mask.mask);
 #else
-#define LOAD_COMPONENT(comp) _mm256_maskload_ps(colour_diff.comp.data() + offs, _mm256_castps_si256(valid_mask))
+#define LOAD_COMPONENT(img, comp) _mm256_maskload_ps(img.comp.data() + offs, _mm256_castps_si256(valid_mask.mask))
 
     rrrr = _mm256_add_ps(rrrr, LOAD_COMPONENT(red));
     gggg = _mm256_add_ps(gggg, LOAD_COMPONENT(blue));
