@@ -17,11 +17,9 @@
 #include <arm_neon.h>
 #elif defined(__AVX512F__)
 #define USE_AVX512
-#define AVX_WIDTH 512
 #include <immintrin.h>
 #elif defined(__AVX2__)
 #define USE_AVX
-#define AVX_WIDTH 256
 #include <immintrin.h>
 #endif
 
@@ -980,7 +978,7 @@ struct Triangulator {
   void run_step(int step, bool verbose, bool do_max_area, bool do_max_dim, int min_time_ms) {
     using namespace std::chrono;
 
-    float max_area = do_max_area ? assembled.size() * 10.0f / step : FLT_MAX;
+    float max_area = do_max_area ? assembled.size() * 30.0f / step : FLT_MAX;
     float max_dim = do_max_dim ? std::max(assembled.width, assembled.height) * 14.937 / step : FLT_MAX;
 
     steady_clock::time_point start_time = steady_clock::now();
