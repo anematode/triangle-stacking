@@ -356,7 +356,7 @@ struct Image {
   void triangle_for_each(Triangle tri, L&& lambda) const {
     triangle_vectorized_for_each(tri, [&] (LoadInfo<LOAD_INFO_W> info) {
       for (int i = 0; i < LOAD_INFO_W; i++) {
-        if (info.valid_mask.arr[i]) {
+        if (info.get_mask(i)) {
           lambda(info.x + i, info.y);
         }
       }
@@ -423,7 +423,7 @@ float bonus(int x, int y) {
 
 #ifdef USE_AVX512
 float horizontal_add(__m512 x) {
-  return __m512_reduce_add_ps(x);
+  return _mm512_reduce_add_ps(x);
 }
 #elif !defined(USE_NEON)
 float horizontal_add(__m256 x) {
@@ -477,7 +477,7 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 #elif defined(USE_AVX512)
 #define LOAD_COMPONENT(img, comp) _mm512_maskz_load_ps(valid_mask, img.comp.data() + offs)
 #define ACCUMULATE_COMPONENT(vec, img, comp) \
-    vec = _mm512_mask_add_ps(vec, vec, LOAD_COMPONENT(img, comp))
+    vec = _mm512_mask_add_ps(vec, valid_mask, vec, LOAD_COMPONENT(img, comp))
 
     ACCUMULATE_COMPONENT(rrrr, colour_diff, red);
     ACCUMULATE_COMPONENT(gggg, colour_diff, blue);
