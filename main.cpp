@@ -475,7 +475,7 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 
     pixel_count += -vaddvq_u32(valid_mask.mask);
 #elif defined(USE_AVX512)
-#define LOAD_COMPONENT(img, comp) _mm512_maskz_load_ps(valid_mask, img.comp.data() + offs)
+#define LOAD_COMPONENT(img, comp) _mm512_maskz_loadu_ps(valid_mask, img.comp.data() + offs)
 #define ACCUMULATE_COMPONENT(vec, img, comp) \
     vec = _mm512_mask_add_ps(vec, valid_mask, vec, LOAD_COMPONENT(img, comp))
 
