@@ -550,11 +550,11 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 #else
 #define COMPUTE_COMPONENT(comp) \
     __m256 st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
-    __m256 result_##comp = _mm256_fmadd_ps(alpha, candidate_##comp, _mm256_mul_ps(st_##comp, alpha_inv)); \
+    __m256 result_##comp = _mm256_fmadd_ps(st_##comp, alpha_inv, _mm256_mul_ps(alpha, candidate_##comp)); \
     __m256 new_error_##comp = _mm256_sub_ps(result_##comp, ta_##comp); \
     __m256 old_error_##comp = _mm256_sub_ps(st_##comp, ta_##comp); \
     improvement_v = _mm256_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
-    improvement_v = _mm256_xor_ps(sign_bit, _mm256_fmsub_ps(old_error_##comp, old_error_##comp, improvement_v));
+    improvement_v = _mm256_sub_ps(improvement_v, _mm256_mul_ps(old_error_##comp, old_error_##comp));
 #endif
 
     COMPUTE_COMPONENT(red);
