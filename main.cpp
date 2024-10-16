@@ -36,8 +36,8 @@
 #include "src/3rdparty/CLI11.hpp"
 
 constexpr float TRI_ALPHA = 0.5;
-const int PERTURBATION_STEPS = 100;
-const int PERTURBATION_GENERATION_SIZE = 50;
+const int PERTURBATION_STEPS = 50;
+const int PERTURBATION_GENERATION_SIZE = 100;
 
 struct Colour {
   float r, g, b, a;
@@ -975,6 +975,8 @@ struct Triangulator {
     fclose(f);
   }
 
+  // 1000 pixels/us on 2 spr cores, 1700 pixels/us on 10 apple cores, 8000 pixels/us on 44 spr cores
+
   void run_step(int step, bool verbose, bool do_max_area, bool do_max_dim, int min_time_ms) {
     using namespace std::chrono;
 
@@ -1017,10 +1019,11 @@ struct Triangulator {
         std::cout << "Original best-triangle improvement: " << best_improvement << '\n';
       }
 
-      std::unordered_set already_tried(ping.begin(), ping.end());
+      std::unordered_set<Triangle> already_tried;
       for (int perturb_step = 0; perturb_step < PERTURBATION_STEPS; ++perturb_step) {
         ping.resize(PERTURBATION_GENERATION_SIZE);
         if (perturb_step == 0) {
+          already_tried = std::unordered_set<Triangle> {ping.begin(), ping.end()};
           best_from_prev_step = ping;  // save for next stage
         }
 
