@@ -299,14 +299,14 @@ struct Image {
   template <typename L>
   requires std::invocable<L, int, int>
   void triangle_for_each(Triangle tri, L&& lambda) const {
-    /*triangle_vectorized_for_each(tri, [&] (LoadInfo<LOAD_INFO_W> info) {
+    triangle_vectorized_for_each(tri, [&] (LoadInfo<LOAD_INFO_W> info) {
       for (int i = 0; i < LOAD_INFO_W; i++) {
         if (info.valid_mask[i]) {
           lambda(info.x + i, info.y);
         }
       }
     });
-    return;*/
+    return;
 
     auto x1 = tri.x1, y1 = tri.y1, x2 = tri.x2, y2 = tri.y2, x3 = tri.x3, y3 = tri.y3;
 
@@ -532,7 +532,6 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
   __m256 candidate_red = _mm256_set1_ps(candidate.colour.r);
   __m256 candidate_green = _mm256_set1_ps(candidate.colour.g);
   __m256 candidate_blue = _mm256_set1_ps(candidate.colour.b);
-  __m256 sign_bit = _mm256_set1_ps(-0.0f);
 #endif
 
   colour_diff.triangle_vectorized_for_each(candidate, [&] (auto info) {
@@ -548,6 +547,8 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
     improvement_v = vfmaq_f32(improvement_v, new_error_##comp, new_error_##comp); \
     improvement_v = vfmsq_f32(improvement_v, old_error_##comp, old_error_##comp);
 #else
+    __m256 initial_improvement = improvement_v;
+
 #define COMPUTE_COMPONENT(comp) \
     __m256 st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
     __m256 result_##comp = _mm256_fmadd_ps(st_##comp, alpha_inv, _mm256_mul_ps(alpha, candidate_##comp)); \
@@ -562,6 +563,10 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
     COMPUTE_COMPONENT(green);
 
 #undef COMPUTE_COMPONENT
+
+#ifndef __ARM_NEON__
+    improvement_v = _mm256_blendv_ps(initial_improvement, improvement_v, _mm256_castsi256_ps(valid_mask.mask));
+#endif
   });
 
 #ifdef __ARM_NEON__
