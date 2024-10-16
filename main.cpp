@@ -280,15 +280,21 @@ struct Image {
         uint32x4_t within_width = vcltq_f32(xxxx, wwww);
 
         inf.valid_mask.mask = vandq_u32(in_triangle, within_width);
-
         xxxx = vaddq_f32(xxxx, increment_x);
+
+        if (!vaddvq_u32(inf.valid_mask.mask)) {
+          continue;
+        }
 #else
         __m256 in_triangle = _mm256_castsi256_ps(_mm256_and_si256(_mm256_and_si256(c1, c2), c3));
         __m256 within_width = _mm256_cmp_ps(xxxx, wwww, _CMP_LT_OQ);
 
         inf.valid_mask.mask = _mm256_and_ps(in_triangle, within_width);
-
         xxxx = _mm256_add_ps(xxxx, increment_x);
+
+        if (!_mm256_movemask_ps(inf.valid_mask.mask)) {
+          continue;
+        }
 #endif
 
         lambda(inf);
@@ -301,7 +307,7 @@ struct Image {
   void triangle_for_each(Triangle tri, L&& lambda) const {
     triangle_vectorized_for_each(tri, [&] (LoadInfo<LOAD_INFO_W> info) {
       for (int i = 0; i < LOAD_INFO_W; i++) {
-        if (info.valid_mask[i]) {
+        if (info.valid_mask.mask[i]) {
           lambda(info.x + i, info.y);
         }
       }
@@ -565,7 +571,7 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 #undef COMPUTE_COMPONENT
 
 #ifndef __ARM_NEON__
-    improvement_v = _mm256_blendv_ps(initial_improvement, improvement_v, _mm256_castsi256_ps(valid_mask.mask));
+    improvement_v = _mm256_blendv_ps(initial_improvement, improvement_v, valid_mask.mask);
 #endif
   });
 
