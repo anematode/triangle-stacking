@@ -595,7 +595,7 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
     improvement_v = _mm512_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
     improvement_v = _mm512_sub_ps(improvement_v, _mm512_mul_ps(old_error_##comp, old_error_##comp));
 #else
-    __m256 initial_improvement = improvement_v;
+    __m256 initial_improvement = improvement_v, max_min_accum = _mm256_setzero_ps();
 
 #define COMPUTE_COMPONENT(comp) \
     __m256 st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
@@ -1097,7 +1097,7 @@ struct Triangulator {
           break;
         }
 
-        auto [ resolved_, total_pixels ] = evaluate_triangle_batched(pong, assembled, colour_diff, target);
+        auto [ resolved_, total_pixels ] = evaluate_triangle_batched(pong, assembled, colour_diff, target, norm);
         triangles_evaluated += pong.size();
         resolved = std::move(resolved_);
         sort_by_best(pong, resolved);
