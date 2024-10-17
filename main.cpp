@@ -39,6 +39,13 @@ constexpr float TRI_ALPHA = 0.5;
 const int PERTURBATION_STEPS = 50;
 const int PERTURBATION_GENERATION_SIZE = 100;
 
+enum class Norm {
+  L2,
+  L1,
+  Max,
+  Min,
+};
+
 struct Colour {
   float r, g, b, a;
   Colour clamp() const {
@@ -61,6 +68,19 @@ Colour operator-(Colour a, Colour b) {
 
 Colour operator*(Colour a, float b) {
   return { a.r * b, a.g * b, a.b * b, a.a * b };
+}
+
+template <Norm NORM>
+float norm(Colour a, Colour b) {
+  if constexpr (NORM == Norm::L2) {
+    return (a - b).r * (a - b).r + (a - b).g * (a - b).g + (a - b).b * (a - b).b;
+  } else if constexpr (NORM == Norm::L1) {
+    return std::abs(a.r - b.r) + std::abs(a.g - b.g) + std::abs(a.b - b.b);
+  } else if constexpr (NORM == Norm::Max) {
+    return std::max({ std::abs(a.r - b.r), std::abs(a.g - b.g), std::abs(a.b - b.b) });
+  } else if constexpr (NORM == Norm::Min) {
+    return std::min({ std::abs(a.r - b.r), std::abs(a.g - b.g), std::abs(a.b - b.b) });
+  }
 }
 
 struct Triangle {
@@ -445,6 +465,7 @@ float horizontal_add(__m256 x) {
 
 #define EVALUATE_TRIANGLE_VECTORIZED
 
+template <Norm norm>
 std::tuple<float /* improvement */, Colour /* best colour */, long /* pixels evaluated */>
 evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_diff, const Image& target) {
   Colour avg_diff = { 1, 1, 1, 1 };
@@ -544,13 +565,25 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
     int offs = y * colour_diff.width + x;
 
 #ifdef USE_NEON
+    float32x4_t max_min_accum = vdupq_n_f32(0);
 #define COMPUTE_COMPONENT(comp) \
     float32x4_t st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
     float32x4_t result_##comp = vfmaq_f32(vmulq_f32(alpha, candidate_##comp), st_##comp, alpha_inv); \
     float32x4_t new_error_##comp = vsubq_f32(result_##comp, ta_##comp); \
     float32x4_t old_error_##comp = vsubq_f32(st_##comp, ta_##comp); \
-    improvement_v = vfmaq_f32(improvement_v, new_error_##comp, new_error_##comp); \
-    improvement_v = vfmsq_f32(improvement_v, old_error_##comp, old_error_##comp);
+    if constexpr (norm == Norm::L2) { \
+      improvement_v = vfmaq_f32(improvement_v, new_error_##comp, new_error_##comp); \
+      improvement_v = vfmsq_f32(improvement_v, old_error_##comp, old_error_##comp); \
+    } else if constexpr (norm == Norm::L1) { \
+      improvement_v = vaddq_f32(improvement_v, vabsq_f32(new_error_##comp)); \
+      improvement_v = vsubq_f32(improvement_v, vabsq_f32(old_error_##comp)); \
+    } else if constexpr (norm == Norm::Max) { \
+      max_min_accum = vmaxq_f32(max_min_accum, new_error_##comp); \
+      max_min_accum = vmaxq_f32(max_min_accum, old_error_##comp); \
+    } else if constexpr (norm == Norm::Min) { \
+      max_min_accum = vminq_f32(max_min_accum, new_error_##comp); \
+      max_min_accum = vminq_f32(max_min_accum, old_error_##comp); \
+    }
 #elif defined(USE_AVX512)
     __m512 initial_improvement = improvement_v;
 
@@ -569,8 +602,20 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
     __m256 result_##comp = _mm256_fmadd_ps(st_##comp, alpha_inv, _mm256_mul_ps(alpha, candidate_##comp)); \
     __m256 new_error_##comp = _mm256_sub_ps(result_##comp, ta_##comp); \
     __m256 old_error_##comp = _mm256_sub_ps(st_##comp, ta_##comp); \
-    improvement_v = _mm256_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
-    improvement_v = _mm256_sub_ps(improvement_v, _mm256_mul_ps(old_error_##comp, old_error_##comp));
+
+    if constexpr (norm == Norm::L2) {
+      improvement_v = _mm256_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
+      improvement_v = _mm256_sub_ps(improvement_v, _mm256_mul_ps(old_error_##comp, old_error_##comp));
+    } else if constexpr (norm == Norm::L1) {
+      improvement_v = _mm256_sub_ps(improvement_v, _mm256_and_ps(new_error_##comp, _mm256_set1_ps(-0.0f)));
+      improvement_v = _mm256_add_ps(improvement_v, _mm256_and_ps(old_error_##comp, _mm256_set1_ps(-0.0f)));
+    } else if constexpr (norm == Norm::Max) {
+      max_min_accum = _mm256_max_ps(max_min_accum, new_error_##comp);
+      max_min_accum = _mm256_max_ps(max_min_accum, old_error_##comp);
+    } else if constexpr (norm == Norm::Min) {
+      max_min_accum = _mm256_min_ps(max_min_accum, new_error_##comp);
+      max_min_accum = _mm256_min_ps(max_min_accum, old_error_##comp);
+    }
 #endif
 
     COMPUTE_COMPONENT(red);
@@ -582,7 +627,14 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 #ifdef USE_AVX512
     improvement_v = _mm512_mask_blend_ps(valid_mask, initial_improvement, improvement_v);
 #elif !defined(USE_NEON)
-    improvement_v = _mm256_or_ps(_mm256_andnot_ps(valid_mask.mask, initial_improvement), _mm256_and_ps(valid_mask.mask, improvement_v));
+    if constexpr (norm == Norm::Max || norm == Norm::Min) {
+      improvement_v = _mm256_or_ps(_mm256_andnot_ps(valid_mask.mask, max_min_accum), _mm256_and_ps(valid_mask.mask, improvement_v));
+    } else {
+      improvement_v = _mm256_or_ps(_mm256_andnot_ps(valid_mask.mask, initial_improvement), _mm256_and_ps(valid_mask.mask, improvement_v));
+    }
+#else
+    if (norm == Norm::Max || norm == Norm::Min)
+      improvement_v = vaddq_f32(improvement_v, max_min_accum);
 #endif
   });
 
@@ -612,7 +664,7 @@ struct BatchEvaluationResults {
 
 BatchEvaluationResults
 evaluate_triangle_batched(const std::vector<Triangle>& candidates,
-  const Image& start, const Image& colour_diff, const Image& target) {
+  const Image& start, const Image& colour_diff, const Image& target, Norm norm) {
   std::vector<std::pair<float, Colour>> results(candidates.size());
   std::vector<long> pixel_counts(candidates.size());
 
@@ -620,7 +672,17 @@ evaluate_triangle_batched(const std::vector<Triangle>& candidates,
 
 #pragma omp parallel for
   for (int i = 0; i < S; ++i) {
-    auto [improvement, colour, pixel_count] = evaluate_triangle(candidates[i], start, colour_diff, target);
+    float improvement;
+    Colour colour;
+    long pixel_count;
+
+    switch (norm) {
+#define CASE(N) case N: std::tie(improvement, colour, pixel_count) = evaluate_triangle<N>(candidates[i], start, colour_diff, target); break
+      CASE(Norm::L2);
+      CASE(Norm::L1);
+      CASE(Norm::Max);
+      CASE(Norm::Min);
+    }
     results[i] = { improvement, colour };
     pixel_counts[i] = pixel_count;
   }
@@ -977,7 +1039,7 @@ struct Triangulator {
 
   // 1000 pixels/us on 2 spr cores, 1700 pixels/us on 10 apple cores, 8000 pixels/us on 44 spr cores
 
-  void run_step(int step, bool verbose, bool do_max_area, bool do_max_dim, int min_time_ms) {
+  void run_step(int step, bool verbose, bool do_max_area, bool do_max_dim, int min_time_ms, Norm norm) {
     using namespace std::chrono;
 
     float max_area = do_max_area ? assembled.size() * 30.0f / step : FLT_MAX;
@@ -1005,7 +1067,7 @@ struct Triangulator {
       std::vector<Triangle> candidates = generate_random_candidates(iterations, W, H, max_area, max_dim);
       std::copy(candidates.begin(), candidates.end(), std::back_inserter(best_from_prev_step));
       triangles_evaluated += candidates.size();
-      auto [ resolved, this_pixels_evaluated ] = evaluate_triangle_batched(candidates, assembled, colour_diff, target);
+      auto [ resolved, this_pixels_evaluated ] = evaluate_triangle_batched(candidates, assembled, colour_diff, target, norm);
       pixels_evaluated += this_pixels_evaluated;
       sort_by_best(candidates, resolved);
 
@@ -1056,7 +1118,7 @@ struct Triangulator {
       }
 
       end_time = steady_clock::now();
-    } while (duration_cast<milliseconds>(end_time - start_time).count() < min_time_ms);
+    } while (duration_cast<milliseconds>(end_time - start_time).count() < min_time_ms || overall_best_improvement >= 0.0);
 
     assembled.draw_triangle(overall_best);
     triangles.push_back(overall_best);
@@ -1104,6 +1166,10 @@ int main(int argc, char **argv) {
   int threads = std::min(hardware_conc, max_threads);
   int min_time = 1000;
 
+  Norm norm = Norm::L1;
+
+  bool final_perturb = false;
+
   app.add_option("--save-state", save_state_file, "Save state file")->required();
   app.add_option("-i,--input", input_file, "Input file")->required();
   app.add_option("--json", output_json, "Output JSON file");
@@ -1113,6 +1179,7 @@ int main(int argc, char **argv) {
   app.add_option("--steps", steps, "Number of steps");
   app.add_option("-t,--num_threads", threads, "Number of processing threads");
   app.add_option("--min-time", min_time, "Minimum time per step in milliseconds");
+  app.add_option("--final-perturb", final_perturb, "Perform a final perturbation/removal pass");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -1149,7 +1216,7 @@ int main(int argc, char **argv) {
   steady_clock::time_point start_time = steady_clock::now();
   int step;
   while ((step = triangulator->triangles.size()) < triangulator->steps) {
-    triangulator->run_step(step, true, true, false, min_time);
+    triangulator->run_step(step, true, true, false, min_time, norm);
     std::cout << triangulator->summarise(false);
 
     if (!intermediate.empty()) {
@@ -1168,31 +1235,13 @@ int main(int argc, char **argv) {
       triangulator->save_to_state(save_state_file);
   }
 
-#if 0
-  bool has_improvement;
-  do {
-    has_improvement = false;
-
+  if (final_perturb) {
     int S = triangulator->triangles.size();
-
     for (int i = S - 2; i >= 0; --i) {
-      has_improvement = triangulator->perturb_single(i) || has_improvement;
-
+      triangulator->perturb_single(i);
       std::cout << "Perturbed triangle " << i << '\n';
-
-      auto filename = "result" + std::to_string(i) + ".png";
-      filename = intermediate + (intermediate[intermediate.size() - 1] == '/' ? "" : "/") + filename;
-
-      /*Image to_write = triangulator->assembled;
-      std::thread write_thread { [to_write = std::move(to_write), filename = std::move(filename)] () {
-        to_write.write_png(filename);
-      } };
-
-      write_thread.detach();*/
     }
-    break;
-  } while (has_improvement);
-#endif
+  }
 
   std::cout << "Total computation time: " << duration_cast<seconds>(steady_clock::now() - start_time).count() << "s\n";
   if (!output_json.empty()) {
