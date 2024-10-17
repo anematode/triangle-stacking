@@ -1168,6 +1168,13 @@ int main(int argc, char **argv) {
 
   Norm norm = Norm::L1;
 
+  std::map<std::string, Norm> map{
+    { "l1", Norm::L1 },
+    { "l2", Norm::L2 },
+    { "max", Norm::Max },
+    { "min", Norm::Min }
+  };
+
   bool final_perturb = false;
 
   app.add_option("--save-state", save_state_file, "Save state file")->required();
@@ -1180,6 +1187,8 @@ int main(int argc, char **argv) {
   app.add_option("-t,--num_threads", threads, "Number of processing threads");
   app.add_option("--min-time", min_time, "Minimum time per step in milliseconds");
   app.add_option("--final-perturb", final_perturb, "Perform a final perturbation/removal pass");
+  app.add_option("--norm", norm, "Norm to use for error calculation")
+      ->transform(CLI::CheckedTransformer(map, CLI::ignore_case));
 
   CLI11_PARSE(app, argc, argv);
 
