@@ -607,8 +607,8 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
       improvement_v = _mm256_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
       improvement_v = _mm256_sub_ps(improvement_v, _mm256_mul_ps(old_error_##comp, old_error_##comp)); \
     } else if constexpr (norm == Norm::L1) { \
-      improvement_v = _mm256_sub_ps(improvement_v, _mm256_and_ps(new_error_##comp, _mm256_set1_ps(-0.0f))); \
-      improvement_v = _mm256_add_ps(improvement_v, _mm256_and_ps(old_error_##comp, _mm256_set1_ps(-0.0f))); \
+      improvement_v = _mm256_add_ps(improvement_v, _mm256_andnot_ps(_mm256_set1_ps(-0.0f), new_error_##comp)); \
+      improvement_v = _mm256_sub_ps(improvement_v, _mm256_andnot_ps(_mm256_set1_ps(-0.0f), old_error_##comp)); \
     } else if constexpr (norm == Norm::Max) { \
       max_min_accum = _mm256_max_ps(max_min_accum, new_error_##comp); \
       max_min_accum = _mm256_max_ps(max_min_accum, old_error_##comp); \
