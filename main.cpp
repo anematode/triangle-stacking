@@ -818,9 +818,9 @@ std::vector<Triangle> generate_random_candidates(size_t iterations, float W, flo
   }
 
   // Sort by minimum y value for cache locality reasons
-  std::sort(candidates.begin(), candidates.end(), [] (const Triangle& a, const Triangle& b) {
+  /*std::sort(candidates.begin(), candidates.end(), [] (const Triangle& a, const Triangle& b) {
     return std::min({ a.y1, a.y2, a.y3 }) < std::min({ b.y1, b.y2, b.y3 });
-  });
+  });*/
 
   return candidates;
 }
