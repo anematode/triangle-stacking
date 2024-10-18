@@ -41,6 +41,7 @@ const int PERTURBATION_GENERATION_SIZE = 100;
 
 enum class Norm {
   L2,
+  L2_Squared,
   L1,
   L3,
   L4,
@@ -65,7 +66,11 @@ T evaluate_norm(T r1, T g1, T b1, T r2, T g2, T b2) {
   if constexpr (std::is_floating_point_v<T>) {
     float dr = abs(r1 - r2), dg = abs(g1 - g2), db = abs(b1 - b2);
     switch (norm) {
-      case Norm::L2: return dr * dr + dg * dg + db * db;
+      case Norm::L2_Squared:
+      case Norm::L2: {
+        float a = dr * dr + dg * dg + db * db;
+        return norm == Norm::L2 ? sqrt(a) : a;
+      }
       case Norm::L1: return dr + dg + db;
       case Norm::L3:
       case Norm::L4: {
@@ -121,7 +126,8 @@ T evaluate_norm(T r1, T g1, T b1, T r2, T g2, T b2) {
     __m256 dr2 = _mm256_mul_ps(dr, dr), dg2 = _mm256_mul_ps(dg, dg), db2 = _mm256_mul_ps(db, db);
 
     switch (norm) {
-      case Norm::L2: return _mm256_add_ps(_mm256_add_ps(dr2, dg2), db2);
+      case Norm::L2: return _mm256_sqrt_ps(_mm256_add_ps(_mm256_add_ps(dr2, dg2), db2));
+      case Norm::L2_Squared: return _mm256_add_ps(_mm256_add_ps(dr2, dg2), db2);
       case Norm::L1: return _mm256_add_ps(_mm256_add_ps(dr, dg), db);
       case Norm::L3:
       case Norm::L4:
@@ -938,6 +944,44 @@ Colour per_channel_mix(Colour mixed, Colour above_black, Colour above_white) {
   };
 }
 
+struct StepStatistics {
+  int step;
+  long pixels_tested;
+  long triangles_tested;
+  long microseconds;
+  std::map<Norm, float> residuals;
+
+  static void write_header(std::ofstream& of) {
+    of << "step,pixels_tested,triangles_tested,microseconds,L2,L2_Squared,L1,RedMean\n" << std::flush;
+  }
+
+  void write_csv(std::ofstream& of) {
+    of << step << ',' << pixels_tested << ',' << triangles_tested << ',' << microseconds << ',';
+    for (auto [key, value] : residuals) {
+      of << value << ',';
+    }
+    of << '\n';
+    of << std::flush;
+  }
+};
+
+std::map<Norm, float> compute_residuals(const Image & image, const Image & target) {
+  std::map<Norm, float> result;
+  auto process = [&] <Norm norm> () {
+    float sum = 0;
+    for (int i = 0; i < image.size(); i++) {
+      sum += evaluate_norm<float, norm>(image.colours[i].r, image.colours[i].g, image.colours[i].b,
+                                        target.colours[i].r, target.colours[i].g, target.colours[i].b);
+    }
+    result[norm] = sum;
+  };
+  process.operator()<Norm::L2>();
+  process.operator()<Norm::L2_Squared>();
+  process.operator()<Norm::L1>();
+  process.operator()<Norm::RedMean>();
+  return result;
+}
+
 struct Triangulator {
   Image target;
   Image assembled;
@@ -1119,7 +1163,7 @@ struct Triangulator {
 
   // 1000 pixels/us on 2 spr cores, 1700 pixels/us on 10 apple cores, 8000 pixels/us on 44 spr cores
 
-  void run_step(int step, bool verbose, bool do_max_area, bool do_max_dim, int min_time_ms, Norm norm) {
+  StepStatistics run_step(int step, bool verbose, bool do_max_area, bool do_max_dim, int min_time_ms, Norm norm) {
     using namespace std::chrono;
 
     float max_area = do_max_area ? assembled.size() * 30.0f / step : FLT_MAX;
@@ -1203,15 +1247,23 @@ struct Triangulator {
     assembled.draw_triangle(overall_best);
     triangles.push_back(overall_best);
 
-    if (verbose) {
-      long time = duration_cast<microseconds>(end_time - start_time).count();
+    long time = duration_cast<microseconds>(end_time - start_time).count();
 
+    if (verbose) {
       std::cout << "Improvement: " << overall_best_improvement << '\n';
       std::cout << "Pixel evaluation rate: " << (pixels_evaluated / time) << " pixels/us\n";
       std::cout << "Triangle evaluation rate: " << triangles_evaluated / (time / 1000000.0) << " triangles/s\n";
       // std::cout << R"({"type": "triangle", "p0": [)" << best.x1 << ", " << best.y1 << "], \"p1\": [" << best.x2 << ", " << best.y2 << "], \"p2\": [" << best.x3 << ", " << best.y3 << "], \"color\": [" << best.colour.r << ", " << best.colour.g << ", " << best.colour.b << "], \"alpha\": " << best.colour.a << "}\n";
       std::cout << "Time taken: " << time << "us\n";
     }
+
+    return {
+      step,
+      pixels_evaluated,
+      triangles_evaluated,
+      time,
+      compute_residuals(assembled, target)
+    };
   }
 
   void output_to_json(const std::string& output) {
@@ -1237,7 +1289,7 @@ int main(int argc, char **argv) {
   CLI::App app{"Triangle approximation utility"};
   argv = app.ensure_utf8(argv);
 
-  std::string input_file, intermediate, output_json, output_final;
+  std::string input_file, intermediate, output_json, output_final, stats_file;
 
   int iterations_per_step = 100000;
   int steps = 1000;
@@ -1251,12 +1303,14 @@ int main(int argc, char **argv) {
   std::map<std::string, Norm> map{
     { "l1", Norm::L1 },
     { "l2", Norm::L2 },
+    { "l2_squared", Norm::L2_Squared},
     { "redmean", Norm::RedMean }
   };
 
   bool final_perturb = false;
 
   app.add_option("--save-state", save_state_file, "Save state file")->required();
+  app.add_option("--stats", stats_file, "Statistics file")->required();
   app.add_option("-i,--input", input_file, "Input file")->required();
   app.add_option("--json", output_json, "Output JSON file");
   app.add_option("-o", output_final, "Output final PNG file")->required();
@@ -1290,6 +1344,15 @@ int main(int argc, char **argv) {
   if (fs::exists(output_final)) no_thanks("File " + output_final + " already exists");
   if (fs::exists(output_json)) no_thanks("File " + output_json + " already exists");
 
+  std::optional<std::ofstream> stats_out;
+  if (!stats_file.empty()) {
+    bool creating = !fs::exists(stats_file);
+    stats_out = std::ofstream { stats_file, std::ios_base::app };
+    if (creating) {
+      StepStatistics::write_header(stats_out.value());
+    }
+  }
+
   triangulator = new Triangulator { std::move(input_file) };
 
   if (fs::exists(save_state_file))
@@ -1304,7 +1367,10 @@ int main(int argc, char **argv) {
   steady_clock::time_point start_time = steady_clock::now();
   int step;
   while ((step = triangulator->triangles.size()) < triangulator->steps) {
-    triangulator->run_step(step, true, true, false, min_time, norm);
+    auto stats = triangulator->run_step(step, true, true, false, min_time, norm);
+    if (stats_out)
+      stats.write_csv(stats_out.value());
+
     std::cout << triangulator->summarise(false);
 
     if (!intermediate.empty()) {
