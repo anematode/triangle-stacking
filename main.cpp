@@ -234,7 +234,7 @@ struct LoadInfo {
 #ifdef USE_AVX512
     return valid_mask & (1 << i);
 #else
-    return valid_mask.arr[i];
+    return valid_mask.arr[i] & (1 << 31);
 #endif
   }
 
@@ -370,7 +370,7 @@ struct Image {
       __m256i check(__m256 x, __m256 y) {
         __m256 res = _mm256_fmadd_ps(y, A2, B);
         res = _mm256_fmadd_ps(x, A1, res);
-        return _mm256_srai_epi32(_mm256_castps_si256(res), 31);
+        return _mm256_castps_si256(res);
       }
     };
 #endif
@@ -436,14 +436,14 @@ struct Image {
         }
 #else
         __m256 in_triangle = _mm256_castsi256_ps(_mm256_and_si256(_mm256_and_si256(c1, c2), c3));
-        __m256 within_width = _mm256_cmp_ps(xxxx, wwww, _CMP_LT_OQ);
-
-        inf.valid_mask.mask = _mm256_and_ps(in_triangle, within_width);
         xxxx = _mm256_add_ps(xxxx, increment_x);
 
-        if (!_mm256_movemask_ps(inf.valid_mask.mask)) {
+        if (!_mm256_movemask_ps(in_triangle)) {
           continue;
         }
+
+        __m256 within_width = _mm256_cmp_ps(xxxx, wwww, _CMP_LT_OQ);
+        inf.valid_mask.mask = _mm256_and_ps(in_triangle, within_width);
 #endif
 
         lambda(inf);
@@ -537,10 +537,6 @@ float horizontal_add(__m256 x) {
   const __m128 hi = _mm_shuffle_ps(sumDual, sumDual, 0x1);
   const __m128 sum = _mm_add_ss(lo, hi);
   return _mm_cvtss_f32(sum);
-}
-
-__m256 redmean_distance(__m256 r1, __m256 g1, __m256 b1, __m256 r2, __m256 g2, __m256 b2) {
-  // https://en.wikipedia.org/wiki/Color_difference#sRGB
 }
 #endif
 
