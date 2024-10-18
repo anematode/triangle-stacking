@@ -111,7 +111,31 @@ T evaluate_norm(T r1, T g1, T b1, T r2, T g2, T b2) {
 #elif USE_AVX512
 #else
   if constexpr (std::is_same_v<T, __m256>) {
+    __m256 dr = _mm256_sub_ps(r1, r2), dg = _mm256_sub_ps(g1, g2), db = _mm256_sub_ps(b1, b2);
+    if (norm == Norm::L1 || norm == Norm::L3) {
+      dr = _mm256_and_ps(dr, _mm256_set1_ps(-0.0f));
+      dg = _mm256_and_ps(dg, _mm256_set1_ps(-0.0f));
+      db = _mm256_and_ps(db, _mm256_set1_ps(-0.0f));
+    }
 
+    __m256 dr2 = _mm256_mul_ps(dr, dr), dg2 = _mm256_mul_ps(dg, dg), db2 = _mm256_mul_ps(db, db);
+
+    switch (norm) {
+      case Norm::L2: return _mm256_sqrt_ps(_mm256_add_ps(_mm256_add_ps(dr2, dg2), db2));
+      case Norm::L1: return _mm256_add_ps(_mm256_add_ps(dr, dg), db);
+      case Norm::L3:
+      case Norm::L4:
+        abort();
+      case Norm::RedMean: {
+        __m256 avg_r = _mm256_mul_ps(_mm256_add_ps(r1, r2), _mm256_set1_ps(0.5f));
+
+        __m256 dr2_coeff = _mm256_fmadd_ps(avg_r, _mm256_set1_ps(1.f / 256.f), _mm256_set1_ps(2));
+        __m256 db2_coeff = _mm256_fmadd_ps(avg_r, _mm256_set1_ps(-1.f / 256.f), _mm256_set1_ps(2 + 255.f / 256.f));
+
+        __m256 result = _mm256_sqrt_ps(_mm256_fmadd_ps(dr2_coeff, dr2, _mm256_fmadd_ps(dg2, _mm256_set1_ps(4), _mm256_mul_ps(db2_coeff, db2))));
+        return result;
+      }
+    }
   }
 #endif
   abort();
