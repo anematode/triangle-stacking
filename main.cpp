@@ -407,6 +407,7 @@ struct Image {
       __m256 yyyy = _mm256_set1_ps((float)y);
       __m256 xxxx = xxxx_min;
 #endif
+      bool found_row = false;
       for (int x = min_x; x <= max_x; x += LOAD_INFO_W) {
         auto c1 = check1.check(xxxx, yyyy);
         auto c2 = check2.check(xxxx, yyyy);
@@ -439,9 +440,12 @@ struct Image {
         xxxx = _mm256_add_ps(xxxx, increment_x);
 
         if (_mm256_testz_ps(_mm256_castsi256_ps(c3), _mm256_castsi256_ps(in_triangle))) {
+          if (found_row)
+            break;
           continue;
         }
 
+        found_row = true;
         in_triangle = _mm256_and_si256(in_triangle, c3);
 
         __m256 within_width = _mm256_cmp_ps(xxxx, wwww, _CMP_LT_OQ);
@@ -449,6 +453,9 @@ struct Image {
 #endif
 
         lambda(inf);
+
+#ifndef USE_NEON
+#endif
       }
     }
   }
