@@ -113,15 +113,15 @@ T evaluate_norm(T r1, T g1, T b1, T r2, T g2, T b2) {
   if constexpr (std::is_same_v<T, __m256>) {
     __m256 dr = _mm256_sub_ps(r1, r2), dg = _mm256_sub_ps(g1, g2), db = _mm256_sub_ps(b1, b2);
     if (norm == Norm::L1 || norm == Norm::L3) {
-      dr = _mm256_and_ps(dr, _mm256_set1_ps(-0.0f));
-      dg = _mm256_and_ps(dg, _mm256_set1_ps(-0.0f));
-      db = _mm256_and_ps(db, _mm256_set1_ps(-0.0f));
+      dr = _mm256_andnot_ps(_mm256_set1_ps(-0.0f), dr);
+      dg = _mm256_andnot_ps(_mm256_set1_ps(-0.0f), dg);
+      db = _mm256_andnot_ps(_mm256_set1_ps(-0.0f), db);
     }
 
     __m256 dr2 = _mm256_mul_ps(dr, dr), dg2 = _mm256_mul_ps(dg, dg), db2 = _mm256_mul_ps(db, db);
 
     switch (norm) {
-      case Norm::L2: return _mm256_sqrt_ps(_mm256_add_ps(_mm256_add_ps(dr2, dg2), db2));
+      case Norm::L2: return _mm256_add_ps(_mm256_add_ps(dr2, dg2), db2);
       case Norm::L1: return _mm256_add_ps(_mm256_add_ps(dr, dg), db);
       case Norm::L3:
       case Norm::L4:
@@ -673,7 +673,7 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
 
 #ifdef USE_NEON
     improvement_v = vaddq_f32(improvement_v, vandq_u32(vsubq_f32(new_error, old_error), valid_mask.mask));
-#elif defined(AVX512)
+#elif defined(USE_AVX512)
     improvement_v = _mm512_mask_add_ps(initial_improvement, valid_mask, improvement_v, _mm512_sub_ps(new_error, old_error));
 #else
     improvement_v = _mm256_add_ps(improvement_v, _mm256_and_ps(_mm256_sub_ps(new_error, old_error), valid_mask.mask));
