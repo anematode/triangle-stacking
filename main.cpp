@@ -65,7 +65,7 @@ T evaluate_norm(T r1, T g1, T b1, T r2, T g2, T b2) {
   if constexpr (std::is_floating_point_v<T>) {
     float dr = abs(r1 - r2), dg = abs(g1 - g2), db = abs(b1 - b2);
     switch (norm) {
-      case Norm::L2: return sqrt(dr * dr + dg * dg + db * db);
+      case Norm::L2: return dr * dr + dg * dg + db * db;
       case Norm::L1: return dr + dg + db;
       case Norm::L3:
       case Norm::L4: {
