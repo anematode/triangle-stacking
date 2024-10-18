@@ -435,15 +435,15 @@ struct Image {
           continue;
         }
 #else
-        __m256 in_triangle = _mm256_castsi256_ps(_mm256_and_si256(_mm256_and_si256(c1, c2), c3));
+        __m256i in_triangle = _mm256_and_si256(_mm256_and_si256(c1, c2), c3);
         xxxx = _mm256_add_ps(xxxx, increment_x);
 
-        if (!_mm256_movemask_ps(in_triangle)) {
+        if (!_mm256_movemask_ps(_mm256_castsi256_ps(in_triangle))) {
           continue;
         }
 
         __m256 within_width = _mm256_cmp_ps(xxxx, wwww, _CMP_LT_OQ);
-        inf.valid_mask.mask = _mm256_and_ps(in_triangle, within_width);
+        inf.valid_mask.mask = _mm256_and_ps(_mm256_castsi256_ps(_mm256_srai_epi32(in_triangle, 31)), within_width);
 #endif
 
         lambda(inf);
