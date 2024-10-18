@@ -9,6 +9,7 @@
 #include <string>
 #include <iostream>
 #include <fstream>
+#include <optional>
 #include <omp.h>
 #include <mutex>
 
