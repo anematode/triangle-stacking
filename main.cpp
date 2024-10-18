@@ -553,7 +553,10 @@ __m256 redmean_distance(__m256 r1, __m256 g1, __m256 b1, __m256 r2, __m256 g2, _
 
 template <Norm norm>
 std::tuple<float /* improvement */, Colour /* best colour */, long /* pixels evaluated */>
-evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_diff, const Image& target) {
+evaluate_triangle(
+  Triangle candidate, const Image& start, const Image& colour_diff, const Image& target,
+  const std::vector<float>& result_to_target_norms
+) {
   Colour avg_diff = { 1, 1, 1, 1 };
   int pixel_count = 0;
 
@@ -669,13 +672,16 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
     COMPUTE_COMPONENT(green);
 
     auto new_error = evaluate_norm<decltype(result_red), norm>(result_red, result_green, result_blue, ta_red, ta_green, ta_blue);
-    auto old_error = evaluate_norm<decltype(result_red), norm>(st_red, st_green, st_blue, ta_red, ta_green, ta_blue);
+    //auto old_error = evaluate_norm<decltype(result_red), norm>(st_red, st_green, st_blue, ta_red, ta_green, ta_blue);
 
 #ifdef USE_NEON
+    float32x4_t old_error = vld1q_f32(result_to_target_norms.data() + offs);
     improvement_v = vaddq_f32(improvement_v, vandq_u32(vsubq_f32(new_error, old_error), valid_mask.mask));
 #elif defined(USE_AVX512)
+    __m512 old_error = _mm512_maskz_loadu_ps(valid_mask, result_to_target_norms.data() + offs);
     improvement_v = _mm512_mask_add_ps(initial_improvement, valid_mask, improvement_v, _mm512_sub_ps(new_error, old_error));
 #else
+    __m256 old_error = _mm256_loadu_ps(result_to_target_norms.data() + offs);
     improvement_v = _mm256_add_ps(improvement_v, _mm256_and_ps(_mm256_sub_ps(new_error, old_error), valid_mask.mask));
 #endif
 
@@ -715,6 +721,25 @@ evaluate_triangle_batched(const std::vector<Triangle>& candidates,
 
   int S = candidates.size();
 
+  std::vector<float> result_to_target_norms(target.size() + 16 /* padding for vector loads */);
+
+  auto eval = [&] <Norm norm> () {
+    for (int i = 0; i < target.size(); i++) {
+      result_to_target_norms[i] = evaluate_norm<float, norm>(
+        start.red[i], start.green[i], start.blue[i],
+        target.red[i], target.green[i], target.blue[i]
+      );
+    }
+  };
+
+  switch (norm) {
+    case Norm::L2: eval.operator()<Norm::L2>(); break;
+    case Norm::L1: eval.operator()<Norm::L1>(); break;
+    case Norm::L3: eval.operator()<Norm::L3>(); break;
+    case Norm::L4: eval.operator()<Norm::L4>(); break;
+    case Norm::RedMean:  eval.operator()<Norm::RedMean>(); break;
+  }
+
 #pragma omp parallel for
   for (int i = 0; i < S; ++i) {
     float improvement;
@@ -722,10 +747,12 @@ evaluate_triangle_batched(const std::vector<Triangle>& candidates,
     long pixel_count;
 
     switch (norm) {
-#define CASE(N) case N: std::tie(improvement, colour, pixel_count) = evaluate_triangle<N>(candidates[i], start, colour_diff, target); break
+#define CASE(N) case N: std::tie(improvement, colour, pixel_count) = evaluate_triangle<N>(candidates[i], start, colour_diff, target, result_to_target_norms); break
       CASE(Norm::L2);
       CASE(Norm::L1);
+      CASE(Norm::RedMean);
     }
+
     results[i] = { improvement, colour };
     pixel_counts[i] = pixel_count;
   }
@@ -1209,11 +1236,12 @@ int main(int argc, char **argv) {
   int threads = std::min(hardware_conc, max_threads);
   int min_time = 1000;
 
-  Norm norm = Norm::L1;
+  Norm norm = Norm::L2;
 
   std::map<std::string, Norm> map{
     { "l1", Norm::L1 },
-    { "l2", Norm::L2 }
+    { "l2", Norm::L2 },
+    { "redmean", Norm::RedMean }
   };
 
   bool final_perturb = false;
