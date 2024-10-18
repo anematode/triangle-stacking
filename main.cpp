@@ -42,9 +42,80 @@ const int PERTURBATION_GENERATION_SIZE = 100;
 enum class Norm {
   L2,
   L1,
-  Max,
-  Min,
+  L3,
+  L4,
+  RedMean,
 };
+
+/**
+ * Compute the color distance between the given colors.
+ * @tparam T Data type to compute the norm of (e.g. multiple colors in parallel)
+ * @tparam norm The norm to use.
+ * @param r1 Red component of the first color.
+ * @param g1 Green component of the first color.
+ * @param b1 Blue component of the first color.
+ * @param r2 Red component of the second color.
+ * @param g2 Green component of the second color.
+ * @param b2 Blue component of the second color.
+ * @return
+ */
+template <typename T, Norm norm>
+T evaluate_norm(T r1, T g1, T b1, T r2, T g2, T b2) {
+  using std::abs;
+  if constexpr (std::is_floating_point_v<T>) {
+    float dr = abs(r1 - r2), dg = abs(g1 - g2), db = abs(b1 - b2);
+    switch (norm) {
+      case Norm::L2: return sqrt(dr * dr + dg * dg + db * db);
+      case Norm::L1: return dr + dg + db;
+      case Norm::L3:
+      case Norm::L4: {
+        if constexpr (norm == Norm::L3) {
+          return std::pow(std::pow(dr, 3) + std::pow(dg, 3) + std::pow(db, 3), 1.0 / 3.0);
+        } else {
+          return std::pow(std::pow(dr, 4) + std::pow(dg, 4) + std::pow(db, 4), 1.0 / 4.0);
+        }
+      }
+      case Norm::RedMean: {
+        float rmean = (r1 + r2) / 2.0;
+        return sqrt((2 + rmean / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rmean) / 256) * db * db);
+      }
+    }
+  }
+
+#ifdef USE_NEON
+  if constexpr (std::is_same_v<T, float32x4_t>) {
+    float32x4_t dr = vsubq_f32(r1, r2), dg = vsubq_f32(g1, g2), db = vsubq_f32(b1, b2);
+    if (norm == Norm::L1 || norm == Norm::L3) {
+      dr = vabsq_f32(dr);
+      dg = vabsq_f32(dg);
+      db = vabsq_f32(db);
+    }
+    float32x4_t dr2 = vmulq_f32(dr, dr), dg2 = vmulq_f32(dg, dg), db2 = vmulq_f32(db, db);
+    switch (norm) {
+      case Norm::L2: return vsqrtq_f32(vaddq_f32(vaddq_f32(dr2, dg2), db2));
+      case Norm::L1: return vaddq_f32(vaddq_f32(dr, dg), db);
+      case Norm::L3:
+      case Norm::L4:
+        abort();
+      case Norm::RedMean: {
+        auto rmean = vmulq_f32(vaddq_f32(r1, r2), vdupq_n_f32(0.5));
+
+        auto dr2_coeff = vfmaq_f32(vdupq_n_f32(2), rmean, vdupq_n_f32(1.f / 256.f));
+        auto db2_coeff = vfmaq_f32(vdupq_n_f32(2.0f + 255.0f / 256.0f), rmean, vdupq_n_f32(-1.f / 256.f));
+
+        auto result = vfmaq_f32(vfmaq_f32(vmulq_f32(dr2_coeff, dr2), dg2, vdupq_n_f32(4)), db2, db2_coeff);
+        return vsqrtq_f32(result);
+      }
+    }
+  }
+#elif USE_AVX512
+#else
+  if constexpr (std::is_same_v<T, __m256>) {
+
+  }
+#endif
+  abort();
+}
 
 struct Colour {
   float r, g, b, a;
@@ -68,19 +139,6 @@ Colour operator-(Colour a, Colour b) {
 
 Colour operator*(Colour a, float b) {
   return { a.r * b, a.g * b, a.b * b, a.a * b };
-}
-
-template <Norm NORM>
-float norm(Colour a, Colour b) {
-  if constexpr (NORM == Norm::L2) {
-    return (a - b).r * (a - b).r + (a - b).g * (a - b).g + (a - b).b * (a - b).b;
-  } else if constexpr (NORM == Norm::L1) {
-    return std::abs(a.r - b.r) + std::abs(a.g - b.g) + std::abs(a.b - b.b);
-  } else if constexpr (NORM == Norm::Max) {
-    return std::max({ std::abs(a.r - b.r), std::abs(a.g - b.g), std::abs(a.b - b.b) });
-  } else if constexpr (NORM == Norm::Min) {
-    return std::min({ std::abs(a.r - b.r), std::abs(a.g - b.g), std::abs(a.b - b.b) });
-  }
 }
 
 struct Triangle {
@@ -456,6 +514,10 @@ float horizontal_add(__m256 x) {
   const __m128 sum = _mm_add_ss(lo, hi);
   return _mm_cvtss_f32(sum);
 }
+
+__m256 redmean_distance(__m256 r1, __m256 g1, __m256 b1, __m256 r2, __m256 g2, __m256 b2) {
+  // https://en.wikipedia.org/wiki/Color_difference#sRGB
+}
 #endif
 
 // target = current * (1 - a) + src * a
@@ -565,77 +627,36 @@ evaluate_triangle(Triangle candidate, const Image& start, const Image& colour_di
     int offs = y * colour_diff.width + x;
 
 #ifdef USE_NEON
-    float32x4_t max_min_accum = vdupq_n_f32(0);
 #define COMPUTE_COMPONENT(comp) \
     float32x4_t st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
-    float32x4_t result_##comp = vfmaq_f32(vmulq_f32(alpha, candidate_##comp), st_##comp, alpha_inv); \
-    float32x4_t new_error_##comp = vsubq_f32(result_##comp, ta_##comp); \
-    float32x4_t old_error_##comp = vsubq_f32(st_##comp, ta_##comp); \
-    if constexpr (norm == Norm::L2) { \
-      improvement_v = vfmaq_f32(improvement_v, new_error_##comp, new_error_##comp); \
-      improvement_v = vfmsq_f32(improvement_v, old_error_##comp, old_error_##comp); \
-    } else if constexpr (norm == Norm::L1) { \
-      improvement_v = vaddq_f32(improvement_v, vabsq_f32(new_error_##comp)); \
-      improvement_v = vsubq_f32(improvement_v, vabsq_f32(old_error_##comp)); \
-    } else if constexpr (norm == Norm::Max) { \
-      max_min_accum = vmaxq_f32(max_min_accum, new_error_##comp); \
-      max_min_accum = vmaxq_f32(max_min_accum, old_error_##comp); \
-    } else if constexpr (norm == Norm::Min) { \
-      max_min_accum = vminq_f32(max_min_accum, new_error_##comp); \
-      max_min_accum = vminq_f32(max_min_accum, old_error_##comp); \
-    }
+    float32x4_t result_##comp = vfmaq_f32(vmulq_f32(alpha, candidate_##comp), st_##comp, alpha_inv);
 #elif defined(USE_AVX512)
-    __m512 initial_improvement = improvement_v;
-
-    #define COMPUTE_COMPONENT(comp) \
+#define COMPUTE_COMPONENT(comp) \
     __m512 st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
-    __m512 result_##comp = _mm512_fmadd_ps(st_##comp, alpha_inv, _mm512_mul_ps(alpha, candidate_##comp)); \
-    __m512 new_error_##comp = _mm512_sub_ps(result_##comp, ta_##comp); \
-    __m512 old_error_##comp = _mm512_sub_ps(st_##comp, ta_##comp); \
-    improvement_v = _mm512_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
-    improvement_v = _mm512_sub_ps(improvement_v, _mm512_mul_ps(old_error_##comp, old_error_##comp));
+    __m512 result_##comp = _mm512_fmadd_ps(st_##comp, alpha_inv, _mm512_mul_ps(alpha, candidate_##comp));
 #else
-    __m256 initial_improvement = improvement_v, max_min_accum = _mm256_setzero_ps();
-
 #define COMPUTE_COMPONENT(comp) \
     __m256 st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
-    __m256 result_##comp = _mm256_fmadd_ps(st_##comp, alpha_inv, _mm256_mul_ps(alpha, candidate_##comp)); \
-    __m256 new_error_##comp = _mm256_sub_ps(result_##comp, ta_##comp); \
-    __m256 old_error_##comp = _mm256_sub_ps(st_##comp, ta_##comp); \
-     \
-    if constexpr (norm == Norm::L2) { \
-      improvement_v = _mm256_fmadd_ps(new_error_##comp, new_error_##comp, improvement_v); \
-      improvement_v = _mm256_sub_ps(improvement_v, _mm256_mul_ps(old_error_##comp, old_error_##comp)); \
-    } else if constexpr (norm == Norm::L1) { \
-      improvement_v = _mm256_add_ps(improvement_v, _mm256_andnot_ps(_mm256_set1_ps(-0.0f), new_error_##comp)); \
-      improvement_v = _mm256_sub_ps(improvement_v, _mm256_andnot_ps(_mm256_set1_ps(-0.0f), old_error_##comp)); \
-    } else if constexpr (norm == Norm::Max) { \
-      max_min_accum = _mm256_max_ps(max_min_accum, new_error_##comp); \
-      max_min_accum = _mm256_max_ps(max_min_accum, old_error_##comp); \
-    } else if constexpr (norm == Norm::Min) { \
-      max_min_accum = _mm256_min_ps(max_min_accum, new_error_##comp); \
-      max_min_accum = _mm256_min_ps(max_min_accum, old_error_##comp); \
-    }
+    __m256 result_##comp = _mm256_fmadd_ps(st_##comp, alpha_inv, _mm256_mul_ps(alpha, candidate_##comp));
 #endif
 
     COMPUTE_COMPONENT(red);
     COMPUTE_COMPONENT(blue);
     COMPUTE_COMPONENT(green);
 
+    auto new_error = evaluate_norm<decltype(result_red), norm>(result_red, result_green, result_blue, ta_red, ta_green, ta_blue);
+    auto old_error = evaluate_norm<decltype(result_red), norm>(st_red, st_green, st_blue, ta_red, ta_green, ta_blue);
+
+#ifdef USE_NEON
+    improvement_v = vaddq_f32(improvement_v, vandq_u32(vsubq_f32(new_error, old_error), valid_mask.mask));
+#elif defined(AVX512)
+    improvement_v = _mm512_mask_add_ps(initial_improvement, valid_mask, improvement_v, _mm512_sub_ps(new_error, old_error));
+#else
+    improvement_v = _mm256_add_ps(improvement_v, _mm256_and_ps(_mm256_sub_ps(new_error, old_error), valid_mask.mask));
+#endif
+
 #undef COMPUTE_COMPONENT
 
-#ifdef USE_AVX512
-    improvement_v = _mm512_mask_blend_ps(valid_mask, initial_improvement, improvement_v);
-#elif !defined(USE_NEON)
-    if constexpr (norm == Norm::Max || norm == Norm::Min) {
-      improvement_v = _mm256_or_ps(_mm256_andnot_ps(valid_mask.mask, max_min_accum), _mm256_and_ps(valid_mask.mask, improvement_v));
-    } else {
-      improvement_v = _mm256_or_ps(_mm256_andnot_ps(valid_mask.mask, initial_improvement), _mm256_and_ps(valid_mask.mask, improvement_v));
-    }
-#else
-    if (norm == Norm::Max || norm == Norm::Min)
-      improvement_v = vaddq_f32(improvement_v, max_min_accum);
-#endif
   });
 
 #ifdef USE_NEON
@@ -680,8 +701,6 @@ evaluate_triangle_batched(const std::vector<Triangle>& candidates,
 #define CASE(N) case N: std::tie(improvement, colour, pixel_count) = evaluate_triangle<N>(candidates[i], start, colour_diff, target); break
       CASE(Norm::L2);
       CASE(Norm::L1);
-      CASE(Norm::Max);
-      CASE(Norm::Min);
     }
     results[i] = { improvement, colour };
     pixel_counts[i] = pixel_count;
@@ -1170,9 +1189,7 @@ int main(int argc, char **argv) {
 
   std::map<std::string, Norm> map{
     { "l1", Norm::L1 },
-    { "l2", Norm::L2 },
-    { "max", Norm::Max },
-    { "min", Norm::Min }
+    { "l2", Norm::L2 }
   };
 
   bool final_perturb = false;
