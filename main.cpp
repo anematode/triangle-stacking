@@ -672,16 +672,16 @@ evaluate_triangle(
     COMPUTE_COMPONENT(green);
 
     auto new_error = evaluate_norm<decltype(result_red), norm>(result_red, result_green, result_blue, ta_red, ta_green, ta_blue);
-    //auto old_error = evaluate_norm<decltype(result_red), norm>(st_red, st_green, st_blue, ta_red, ta_green, ta_blue);
+    auto old_error = evaluate_norm<decltype(result_red), norm>(st_red, st_green, st_blue, ta_red, ta_green, ta_blue);
 
 #ifdef USE_NEON
-    float32x4_t old_error = vld1q_f32(result_to_target_norms.data() + offs);
+    // float32x4_t old_error = vld1q_f32(result_to_target_norms.data() + offs);
     improvement_v = vaddq_f32(improvement_v, vandq_u32(vsubq_f32(new_error, old_error), valid_mask.mask));
 #elif defined(USE_AVX512)
-    __m512 old_error = _mm512_maskz_loadu_ps(valid_mask, result_to_target_norms.data() + offs);
+    // __m512 old_error = _mm512_maskz_loadu_ps(valid_mask, result_to_target_norms.data() + offs);
     improvement_v = _mm512_mask_add_ps(initial_improvement, valid_mask, improvement_v, _mm512_sub_ps(new_error, old_error));
 #else
-    __m256 old_error = _mm256_loadu_ps(result_to_target_norms.data() + offs);
+    // __m256 old_error = _mm256_loadu_ps(result_to_target_norms.data() + offs);
     improvement_v = _mm256_add_ps(improvement_v, _mm256_and_ps(_mm256_sub_ps(new_error, old_error), valid_mask.mask));
 #endif
 
@@ -737,7 +737,7 @@ evaluate_triangle_batched(const std::vector<Triangle>& candidates,
     case Norm::L1: eval.operator()<Norm::L1>(); break;
     case Norm::L3: eval.operator()<Norm::L3>(); break;
     case Norm::L4: eval.operator()<Norm::L4>(); break;
-    case Norm::RedMean:  eval.operator()<Norm::RedMean>(); break;
+    case Norm::RedMean: eval.operator()<Norm::RedMean>(); break;
   }
 
 #pragma omp parallel for
@@ -816,6 +816,11 @@ std::vector<Triangle> generate_random_candidates(size_t iterations, float W, flo
       };
     } while (area(can) > max_area || can.max_dim() > max_dim);
   }
+
+  // Sort by minimum y value for cache locality reasons
+  std::sort(candidates.begin(), candidates.end(), [] (const Triangle& a, const Triangle& b) {
+    return std::min({ a.y1, a.y2, a.y3 }) < std::min({ b.y1, b.y2, b.y3 });
+  });
 
   return candidates;
 }
