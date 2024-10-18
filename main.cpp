@@ -672,16 +672,16 @@ evaluate_triangle(
     COMPUTE_COMPONENT(green);
 
     auto new_error = evaluate_norm<decltype(result_red), norm>(result_red, result_green, result_blue, ta_red, ta_green, ta_blue);
-    // auto old_error = evaluate_norm<decltype(result_red), norm>(st_red, st_green, st_blue, ta_red, ta_green, ta_blue);
+    auto old_error = evaluate_norm<decltype(result_red), norm>(st_red, st_green, st_blue, ta_red, ta_green, ta_blue);
 
 #ifdef USE_NEON
-    float32x4_t old_error = vld1q_f32(result_to_target_norms.data() + offs);
+    //float32x4_t old_error = vld1q_f32(result_to_target_norms.data() + offs);
     improvement_v = vaddq_f32(improvement_v, vandq_u32(vsubq_f32(new_error, old_error), valid_mask.mask));
 #elif defined(USE_AVX512)
-    __m512 old_error = _mm512_maskz_loadu_ps(valid_mask, result_to_target_norms.data() + offs);
+    //__m512 old_error = _mm512_maskz_loadu_ps(valid_mask, result_to_target_norms.data() + offs);
     improvement_v = _mm512_mask_add_ps(initial_improvement, valid_mask, improvement_v, _mm512_sub_ps(new_error, old_error));
 #else
-    __m256 old_error = _mm256_loadu_ps(result_to_target_norms.data() + offs);
+    //__m256 old_error = _mm256_loadu_ps(result_to_target_norms.data() + offs);
     improvement_v = _mm256_add_ps(improvement_v, _mm256_and_ps(_mm256_sub_ps(new_error, old_error), valid_mask.mask));
 #endif
 
