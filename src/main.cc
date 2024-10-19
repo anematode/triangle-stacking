@@ -153,7 +153,7 @@ int main(int argc, char **argv) {
   omp_set_num_threads(threads);
 
   if (!fs::exists(input_file)) no_thanks("Input file " + input_file + "does not exist");
-  if (!fs::is_directory(intermediate)) no_thanks("Output-intermediate folder does not exist");
+  if (!intermediate.empty() && !fs::is_directory(intermediate)) no_thanks("Output-intermediate folder does not exist");
   if (fs::exists(output_final)) no_thanks("File " + output_final + " already exists");
   if (fs::exists(output_json)) no_thanks("File " + output_json + " already exists");
 
@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
 
   steady_clock::time_point start_time = steady_clock::now();
   size_t step;
-  while ((step = triangulator->triangles.size()) < triangulator->steps) {
+  while ((step = triangulator->triangles.size()) < (size_t)triangulator->steps) {
     auto stats = triangulator->run_step(step, true, true, false, min_time, norm);
     if (stats_out)
       stats.write_csv(stats_out.value());
@@ -210,6 +210,7 @@ int main(int argc, char **argv) {
       triangulator->perturb_single(i);
       std::cout << "Perturbed triangle " << i << '\n';
     }
+    triangulator->save_to_state(save_state_file);
   }
 
   std::cout << "Total computation time: " << duration_cast<seconds>(steady_clock::now() - start_time).count() << "s\n";

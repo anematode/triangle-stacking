@@ -193,11 +193,11 @@ struct Image {
 #elif defined(USE_AVX512)
     __m512 increment_x = _mm512_set1_ps(LOAD_INFO_W);
     __m512 xxxx_min = _mm512_add_ps(_mm512_set1_ps((float)min_x), _mm512_loadu_ps(x_offset));
-    __m512 wwww = _mm512_set1_ps((float)width);
+    __m512 wwww = _mm512_set1_ps((float)width + LOAD_INFO_W);
 #else
     __m256 increment_x = _mm256_set1_ps(LOAD_INFO_W);
     __m256 xxxx_min = _mm256_add_ps(_mm256_set1_ps((float)min_x), _mm256_loadu_ps(x_offset));
-    __m256 wwww = _mm256_set1_ps((float)width);
+    __m256 wwww = _mm256_set1_ps((float)width + LOAD_INFO_W /* because of how we're doing this later */);
 #endif
 
     for (int y = min_y; y <= max_y; y++) {
