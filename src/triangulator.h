@@ -21,7 +21,7 @@ float len(Colour colour);
 
 #ifdef USE_AVX512
 float horizontal_add(__m512 x);
-#elif USE_AVX2
+#elif USE_AVX
 float horizontal_add(__m256 x);
 #else
 float horizontal_add(float32x4_t x);

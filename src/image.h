@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 #include <string>
+#include <cstring>
 
 #include "colour.h"
 #include "triangle.h"

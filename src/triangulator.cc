@@ -28,10 +28,6 @@ float horizontal_add(float32x4_t x) {
 }
 #endif
 
-float len(Colour colour) {
-  return colour.r * colour.r + colour.g * colour.g + colour.b * colour.b;
-}
-
 BatchEvaluationResults evaluate_triangle_batched(
   const std::vector<Triangle> &candidates,
   const Image &start,
@@ -270,8 +266,8 @@ bool Triangulator::perturb_single(size_t i) {
         Colour mixed = colour * TRI_ALPHA + below * (1 - TRI_ALPHA);
         Colour final = per_channel_mix(mixed, above, above_white);
 
-        improvement += len(final - target(x, y));
-        improvement -= len(assembled(x, y) - target(x, y));
+        improvement += (final - target(x, y)).len();
+        improvement -= (assembled(x, y) - target(x, y)).len();
       });
 
       improvements[i] = improvement;

@@ -26,6 +26,7 @@ struct Colour {
   float r, g, b, a;
 
   Colour clamp() const;
+  float len() const;
 };
 
 Colour operator+(Colour a, Colour b);
@@ -111,21 +112,21 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
     }
   }
 #elif USE_AVX512
-  if constexpr (sizeof(T) == sizeof(__m512)) {
+  if constexpr (std::is_same_v<T, __m512>) {
     __m512 dr = _mm512_sub_ps(r1, r2), dg = _mm512_sub_ps(g1, g2), db = _mm512_sub_ps(b1, b2);
-    if (norm == Norm::L1 || norm == Norm::L3) {
+    if (norm == ErrorMetric::L1 || norm == ErrorMetric::L3) {
       dr = _mm512_abs_ps(dr); dg = _mm512_abs_ps(dg); db = _mm512_abs_ps(db);
     }
     __m512 dr2 = _mm512_mul_ps(dr, dr), dg2 = _mm512_mul_ps(dg, dg), db2 = _mm512_mul_ps(db, db);
 
     switch (norm) {
-      case Norm::L2: return _mm512_sqrt_ps(_mm512_add_ps(_mm512_add_ps(dr2, dg2), db2));
-      case Norm::L2_Squared: return _mm512_add_ps(_mm512_add_ps(dr2, dg2), db2);
-      case Norm::L1: return _mm512_add_ps(_mm512_add_ps(dr, dg), db);
-      case Norm::L3:
-      case Norm::L4:
+      case ErrorMetric::L2: return _mm512_sqrt_ps(_mm512_add_ps(_mm512_add_ps(dr2, dg2), db2));
+      case ErrorMetric::L2_Squared: return _mm512_add_ps(_mm512_add_ps(dr2, dg2), db2);
+      case ErrorMetric::L1: return _mm512_add_ps(_mm512_add_ps(dr, dg), db);
+      case ErrorMetric::L3:
+      case ErrorMetric::L4:
         break;
-      case Norm::RedMean: {
+      case ErrorMetric::RedMean: {
         __m512 avg_r = _mm512_mul_ps(_mm512_add_ps(r1, r2), _mm512_set1_ps(0.5f));
 
         __m512 dr2_coeff = _mm512_fmadd_ps(avg_r, _mm512_set1_ps(1.f / 256.f), _mm512_set1_ps(2));
@@ -137,9 +138,9 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
     }
   }
 #else
-  if constexpr (sizeof(T) == sizeof(__m256)) {
+  if constexpr (std::is_same_v<T, __m256>) {
     __m256 dr = _mm256_sub_ps(r1, r2), dg = _mm256_sub_ps(g1, g2), db = _mm256_sub_ps(b1, b2);
-    if (norm == Norm::L1 || norm == Norm::L3) {
+    if (norm == ErrorMetric::L1 || norm == ErrorMetric::L3) {
       dr = _mm256_andnot_ps(_mm256_set1_ps(-0.0f), dr);
       dg = _mm256_andnot_ps(_mm256_set1_ps(-0.0f), dg);
       db = _mm256_andnot_ps(_mm256_set1_ps(-0.0f), db);
@@ -148,13 +149,13 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
     __m256 dr2 = _mm256_mul_ps(dr, dr), dg2 = _mm256_mul_ps(dg, dg), db2 = _mm256_mul_ps(db, db);
 
     switch (norm) {
-      case Norm::L2: return _mm256_sqrt_ps(_mm256_add_ps(_mm256_add_ps(dr2, dg2), db2));
-      case Norm::L2_Squared: return _mm256_add_ps(_mm256_add_ps(dr2, dg2), db2);
-      case Norm::L1: return _mm256_add_ps(_mm256_add_ps(dr, dg), db);
-      case Norm::L3:
-      case Norm::L4:
+      case ErrorMetric::L2: return _mm256_sqrt_ps(_mm256_add_ps(_mm256_add_ps(dr2, dg2), db2));
+      case ErrorMetric::L2_Squared: return _mm256_add_ps(_mm256_add_ps(dr2, dg2), db2);
+      case ErrorMetric::L1: return _mm256_add_ps(_mm256_add_ps(dr, dg), db);
+      case ErrorMetric::L3:
+      case ErrorMetric::L4:
         break;
-      case Norm::RedMean: {
+      case ErrorMetric::RedMean: {
         __m256 avg_r = _mm256_mul_ps(_mm256_add_ps(r1, r2), _mm256_set1_ps(0.5f));
         __m256 dr2_coeff = _mm256_fmadd_ps(avg_r, _mm256_set1_ps(1.f / 256.f), _mm256_set1_ps(2));
         __m256 db2_coeff = _mm256_fmadd_ps(avg_r, _mm256_set1_ps(-1.f / 256.f), _mm256_set1_ps(2 + 255.f / 256.f));
