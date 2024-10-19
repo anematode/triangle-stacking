@@ -112,7 +112,7 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
     }
   }
 #elif USE_AVX512
-  if constexpr (std::is_same_v<T, __m512>) {
+  if constexpr (std::is_same_v<Data, __m512>) {
     __m512 dr = _mm512_sub_ps(r1, r2), dg = _mm512_sub_ps(g1, g2), db = _mm512_sub_ps(b1, b2);
     if (norm == ErrorMetric::L1 || norm == ErrorMetric::L3) {
       dr = _mm512_abs_ps(dr); dg = _mm512_abs_ps(dg); db = _mm512_abs_ps(db);
@@ -138,7 +138,7 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
     }
   }
 #else
-  if constexpr (std::is_same_v<T, __m256>) {
+  if constexpr (std::is_same_v<Data, __m256>) {
     __m256 dr = _mm256_sub_ps(r1, r2), dg = _mm256_sub_ps(g1, g2), db = _mm256_sub_ps(b1, b2);
     if (norm == ErrorMetric::L1 || norm == ErrorMetric::L3) {
       dr = _mm256_andnot_ps(_mm256_set1_ps(-0.0f), dr);
