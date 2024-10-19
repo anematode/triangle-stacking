@@ -6,7 +6,7 @@ float horizontal_add(__m512 x) {
 }
 #endif
 
-#ifdef USE_AVX2
+#ifdef USE_AVX
 // Credit: https://stackoverflow.com/a/13222410/13458117
 float horizontal_add(__m256 x) {
   const __m128 hi_quad = _mm256_extractf128_ps(x, 1);

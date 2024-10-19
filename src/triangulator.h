@@ -17,8 +17,6 @@ constexpr float TRI_ALPHA = 0.5;
 const int PERTURBATION_STEPS = 50;
 const int PERTURBATION_GENERATION_SIZE = 100;
 
-float len(Colour colour);
-
 #ifdef USE_AVX512
 float horizontal_add(__m512 x);
 #elif defined(USE_AVX)
@@ -181,7 +179,7 @@ float compute_triangle_improvement(Triangle candidate, const Image &start, const
       Colour result = start(x, y) * (1 - TRI_ALPHA) + candidate.colour * TRI_ALPHA;
       Colour new_error = result - target(x, y);
       Colour old_error = start(x, y) - target(x, y);
-      improvement += len(new_error) - len(old_error);
+      improvement += new_error.len() - old_error.len();
     });
   }
 
