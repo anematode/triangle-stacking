@@ -25,6 +25,7 @@ template <size_t N_IMAGES, bool USE_FP16>
 requires (N_IMAGES > 0)
 struct LoadedPixelsSet {
   ColourMask valid_mask;
+  bool all_valid;
   std::array<LoadedPixels<USE_FP16>, N_IMAGES> image_data;
 
   using ColourTy = std::conditional_t<USE_FP16, unsigned short, float>;
@@ -38,13 +39,13 @@ struct LoadedPixelsSet {
 
     auto store = [&] (ColourVec vec, ColourVec original, ColourTy* addr) {
 #ifdef USE_NEON
-      if (MustRespectMask)
+      if (MustRespectMask && !all_valid)
         ColourVec::select(valid_mask, vec, original).store(addr);
 #elif defined(USE_AVX512)
-      if (MustRespectMask)
+      if (MustRespectMask && !all_valid)
         _mm512_mask_storeu_ps(addr, valid_mask, vec);
 #else
-      if (MustRespectMask)
+      if (MustRespectMask && !all_valid)
         ColourVec::select(valid_mask, vec, original).store(addr);
 #endif
       else
@@ -183,14 +184,18 @@ struct Triangle {
 
 #ifdef USE_NEON
         ColourMask in_triangle_mask { vandq_u32(in_triangle, in_bounds) };
+        bool all_valid = (-vaddvq_u32(in_triangle_mask)) == ColourVec::ELEMENTS;
 #elif defined(USE_AVX512)
         ColourMask in_triangle_mask { _mm512_mask_cmp_ps_mask(early_in_triangle, in_triangle, in_bounds, _CMP_LT_OS) };
+        bool all_valid = _mm512_kortestc(early_in_triangle, in_triangle);
 #else
         ColourMask in_triangle_mask { _mm256_and_ps(in_triangle, in_bounds) };
+        bool all_valid = _mm256_movemask_ps(in_triangle_mask) == 0xff;
 #endif
 
         LoadedPixelsSet<sizeof...(Images), USE_FP16> loaded {
           in_triangle_mask,
+          all_valid,
           {
             std::apply(
               [&] (auto& image) -> LoadedPixels<USE_FP16> {

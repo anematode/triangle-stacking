@@ -7,9 +7,9 @@
 #include "triangle.h"
 #include "image.h"
 
-#define USE_FP16 false
+#define USE_FP16 true
 #ifdef SFML_SUPPORTED
-#define SHOW_IMAGE false
+#define SHOW_IMAGE true
 #else
 #define SHOW_IMAGE false
 #endif
