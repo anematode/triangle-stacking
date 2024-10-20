@@ -433,7 +433,7 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
         __m512 dr2_coeff = _mm512_fmadd_ps(avg_r, _mm512_set1_ps(1.f / 256.f), _mm512_set1_ps(2));
         __m512 db2_coeff = _mm512_fmadd_ps(avg_r, _mm512_set1_ps(-1.f / 256.f), _mm512_set1_ps(2 + 255.f / 256.f));
 
-        __m512 result = _mm512_sqrt_ps(_mm512_fmadd_ps(dr2_coeff, dr2, _mm512_fmadd_ps(dg2, _mm512_set1_ps(4), _mm512_mul_ps(db2_coeff, db2)));
+        __m512 result = _mm512_sqrt_ps(_mm512_fmadd_ps(dr2_coeff, dr2, _mm512_fmadd_ps(dg2, _mm512_set1_ps(4), _mm512_mul_ps(db2_coeff, db2))));
         return result;
       }
     }
