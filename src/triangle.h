@@ -43,7 +43,7 @@ struct LoadedPixelsSet {
         ColourVec::select(valid_mask, vec, original).store(addr);
 #elif defined(USE_AVX512)
       if (MustRespectMask)
-        _mm512_mask_storeu_ps(addr, valid_mask, vec);
+        vec.masked_store(addr, valid_mask);
 #else
       if (MustRespectMask)
         ColourVec::select(valid_mask, vec, original).store(addr);
@@ -164,21 +164,27 @@ struct Triangle {
 
 #ifdef USE_NEON
         auto in_triangle = vshrq_n_s32(vreinterpretq_s32_u32(vandq_u32(vandq_u32(c1, c2), c3)), 31);
-        auto early_in_triangle = vaddvq_s32(in_triangle);
+        auto early_in_triangle = vaddvq_s32(in_triangle) == 0;
 #elif defined(USE_AVX512)
         auto in_triangle = _mm512_movepi32_mask(_mm512_ternarylogic_epi32(
           _mm512_castps_si512(c1), _mm512_castps_si512(c2), _mm512_castps_si512(c3), 0x80));
-        auto early_in_triangle = in_triangle;
+        auto early_in_triangle = !in_triangle;
 #else
-        auto in_triangle = _mm256_and_ps(_mm256_and_ps(c1, c2), c3);
+        auto in_triangle = _mm256_and_ps(c1, c2);
         bool early_in_triangle = _mm256_testz_ps(c3, in_triangle);
 #endif
 
-        if (!early_in_triangle) {
+        if (early_in_triangle) {
           if (found_row)
             break;
           continue;
         }
+
+        found_row = true;
+
+#ifdef USE_AVX
+        in_triangle = _mm256_and_ps(in_triangle, c3);
+#endif
 
         auto in_bounds = xxxx < wwww;
 
