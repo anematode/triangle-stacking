@@ -72,8 +72,9 @@ int main() {
     enjoy(triangle, img);
 
     if (i % 10000 == 0) {
-#if SHOW_IMAGE
       img.compute_colours();
+
+#if SHOW_IMAGE
       img.show(window);
       if (poll_events(window, false)) break;
 #endif
