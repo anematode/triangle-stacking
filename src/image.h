@@ -124,7 +124,9 @@ struct Image {
     for (int y = 0; y < height; y++) {
       for (int x = 0; x < width; x++) {
         auto& c = colours[y * width + x];
-        img.setPixel(x, y, sf::Color(c.r * 255, c.g * 255, c.b * 255, c.a * 255));
+        img.setPixel(x, y, sf::Color(
+          convert_channel(c.r), convert_channel(c.g), convert_channel(c.b), 255
+          ));
       }
     }
 

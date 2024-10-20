@@ -46,7 +46,7 @@ int main() {
 
   steady_clock::time_point start = steady_clock::now();
 
-  for (int i = 0; i < 10000000; ++i) {
+  for (int i = 0; i < 30000; ++i) {
     triangle = Triangle {
       rand() / (float)RAND_MAX * img.width,
       rand() / (float)RAND_MAX * img.height,
@@ -81,6 +81,8 @@ int main() {
       std::cout << "Triangles/second: " << i / duration_cast<duration<float>>(steady_clock::now() - start).count() << std::endl;
     }
   }
+
+  img.write_png("out.png");
 
 #if SHOW_IMAGE
   poll_events(window, true);
