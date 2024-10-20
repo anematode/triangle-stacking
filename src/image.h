@@ -392,7 +392,8 @@ struct Image {
   }
 };
 
-
+#ifdef SFML_SUPPORTED
 bool poll_events(sf::RenderWindow &window, bool forever);
+#endif
 
 #endif //IMAGE_H
