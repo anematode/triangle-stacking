@@ -9,7 +9,7 @@
 
 #define USE_FP16 true
 #ifdef SFML_SUPPORTED
-#define SHOW_IMAGE true
+#define SHOW_IMAGE false
 #else
 #define SHOW_IMAGE false
 #endif
@@ -46,7 +46,7 @@ int main() {
 
   steady_clock::time_point start = steady_clock::now();
 
-  for (int i = 0; i < 30000; ++i) {
+  for (int i = 0; i < 100000; ++i) {
     triangle = Triangle {
       rand() / (float)RAND_MAX * img.width,
       rand() / (float)RAND_MAX * img.height,
@@ -72,9 +72,8 @@ int main() {
     enjoy(triangle, img);
 
     if (i % 10000 == 0) {
-      img.compute_colours();
-
 #if SHOW_IMAGE
+      img.compute_colours();
       img.show(window);
       if (poll_events(window, false)) break;
 #endif
@@ -83,6 +82,7 @@ int main() {
     }
   }
 
+  img.compute_colours();
   img.write_png("out.png");
 
 #if SHOW_IMAGE
