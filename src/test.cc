@@ -7,9 +7,12 @@
 #include "triangle.h"
 #include "image.h"
 
+#define USE_FP16 false
+#define SHOW_IMAGE false
+
 __attribute__((noinline))
-void enjoy(const Triangle & triangle, Image & img) {
-  triangle.triangle_for_each_vectorized([&] (LoadedPixelsSet<1> loaded) {
+void enjoy(const Triangle& triangle, Image<USE_FP16>& img) {
+  triangle.triangle_for_each_vectorized([&] (LoadedPixelsSet<1, USE_FP16> loaded) {
     auto [r, g, b, a] = triangle.colour;
     auto [red, green, blue ] = loaded.image_data[0].colours();
     loaded.store_colour<0>(
@@ -22,7 +25,7 @@ void enjoy(const Triangle & triangle, Image & img) {
 
 int main() {
   using namespace std::chrono;
-  Image img { 640, 480 };
+  Image<USE_FP16> img { 1920, 1080 };
 
   Triangle triangle { 500, 10, 10, 50, 100, 150, { 1, 1, 1, 1 } };
 
@@ -30,8 +33,10 @@ int main() {
     *colours[0] = { 1, 0, 0, 1 };
   }, img);
 
+#if SHOW_IMAGE
   auto window = img.create_window();
   img.show(window);
+#endif
 
   steady_clock::time_point start = steady_clock::now();
 
@@ -51,22 +56,27 @@ int main() {
       }
     };
 
-    if (triangle.area() > 1000) {
+    /*
+    if (triangle.area() > 100000) {
       i--;
       continue;
     }
+    */
 
     enjoy(triangle, img);
 
     if (i % 10000 == 0) {
+#if SHOW_IMAGE
       img.compute_colours();
       img.show(window);
+      if (poll_events(window, false)) break;
+#endif
 
       std::cout << "Triangles/second: " << i / duration_cast<duration<float>>(steady_clock::now() - start).count() << std::endl;
-
-      if (Image::poll_events(window)) break;
     }
   }
 
-  Image::poll_events(window, true);
+#if SHOW_IMAGE
+  poll_events(window, true);
+#endif
 }

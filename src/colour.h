@@ -48,17 +48,29 @@ struct ColourVec {
   static ColourVec and_(ColourVec c1, ColourVec c2) {
     return { vreinterpretq_f32_u32(vandq_u32(vreinterpretq_u32_f32(c1.data), vreinterpretq_u32_f32(c2.data))) };
   }
-  static ColourVec load(float* ptr) {
-    return { vld1q_f32(ptr) };
+  template <typename Ty = float>
+  static ColourVec load(const Ty* ptr) {
+    if constexpr (std::is_same_v<Ty, float>)
+      return { vld1q_f32(ptr) };
+    else
+      return { vcvt_f32_f16(vld1_f16((const __fp16*) ptr)) };
   }
   static ColourVec select(ColourMask mask, ColourVec a, ColourVec b) {
     return { vbslq_f32(mask.data, a.data, b.data) };
   }
-  void store(float* ptr) const {
-    vst1q_f32(ptr, data);
+  template <typename Ty = float>
+  void store(Ty* ptr) const {
+    if constexpr (std::is_same_v<Ty, float>)
+      vst1q_f32(ptr, data);
+    else
+      vst1_f16((__fp16*) ptr, vcvt_f16_f32(data));
   }
-  void masked_store(float* ptr, ColourMask mask) const {
-    vst1q_f32(ptr, vbslq_f32(mask.data, data, vld1q_f32(ptr)));
+  template <typename Ty = float>
+  void masked_store(Ty* ptr, ColourMask mask) const {
+    if constexpr (std::is_same_v<Ty, float>)
+      vst1q_f32(ptr, vbslq_f32(mask.data, data, vld1q_f32(ptr)));
+    else
+      vst1_f16((__fp16*) ptr, vcvt_f16_f32(vbslq_f32(mask.data, data, vcvt_f32_f16(vld1_f16(ptr)))));
   }
   ColourVec operator+(const ColourVec &other) const {
     return { vaddq_f32(data, other.data) };
@@ -140,17 +152,29 @@ struct ColourVec {
   static ColourVec all(float val) {
     return { _mm512_set1_ps(val) };
   }
-  static ColourVec load(float* ptr) {
-    return { _mm512_loadu_ps(ptr) };
+  template <typename Ty>
+  static ColourVec load(Ty* ptr) {
+    if constexpr (std::is_same_v<Ty, float>)
+      return { _mm512_loadu_ps(ptr) };
+    else
+      _mm512_cvtph_ps(_mm256_loadu_si256(ptr));
   }
   static ColourVec select(ColourMask mask, ColourVec a, ColourVec b) {
     return { _mm512_mask_blend_ps(mask, b.data, a.data) };
   }
-  void store(float* ptr) const {
-    _mm512_storeu_ps(ptr, data);
+  template <typename Ty>
+  void store(Ty* ptr) const {
+    if constexpr (std::is_same_v<Ty, float>)
+      _mm512_storeu_ps(ptr, data);
+    else
+      _mm256_storeu_si256(ptr, _mm512_cvtps_ph(data, 0));
   }
-  void masked_store(float* ptr, ColourMask mask) const {
-    _mm512_mask_storeu_ps(ptr, mask, data);
+  template <typename Ty>
+  void masked_store(Ty* ptr, ColourMask mask) const {
+    if constexpr (std::is_same_v<Ty, float>)
+      _mm512_mask_storeu_ps(ptr, mask, data);
+    else
+      _mm256_mask_storeu_si256(ptr, mask, _mm512_cvtps_ph(data, 0));
   }
   ColourVec operator+(const ColourVec &other) const {
     return { _mm512_add_ps(data, other.data) };
@@ -226,18 +250,30 @@ struct ColourVec {
   static ColourVec all(float val) {
     return { _mm256_set1_ps(val) };
   }
-  static ColourVec load(float* ptr) {
-    return { _mm256_loadu_ps(ptr) };
+  template <typename Ty>
+  static ColourVec load(Ty* ptr) {
+    if constexpr (std::is_same_v<Ty, float>)
+      return { _mm256_loadu_ps(ptr) };
+    else
+      return _mm256_cvtph_ps(_mm_loadu_si128(ptr));
   }
   static ColourVec select(ColourMask mask, ColourVec a, ColourVec b) {
     return { _mm256_blendv_ps(b.data, a.data, mask.data) };
   }
-  void store(float* ptr) const {
-    _mm256_storeu_ps(ptr, data);
+  template <typename Ty>
+  void store(Ty* ptr) const {
+    if constexpr (std::is_same_v<Ty, float>)
+      _mm256_storeu_ps(ptr, data);
+    else
+      _mm_storeu_si128(ptr, _mm256_cvtps_ph(data, 0));
   }
-  void masked_store(float* ptr, ColourMask mask) const {
+  template <typename Ty>
+  void masked_store(Ty* ptr, ColourMask mask) const {
     // slow on Zen 2 tho
-    _mm256_maskstore_ps(ptr, mask, data);
+    if constexpr (std::is_same_v<Ty, float>)
+      _mm256_maskstore_ps(ptr, _mm256_castps_si256(mask), data);
+    else
+      abort();
   }
   ColourVec operator+(const ColourVec &other) const {
     return { _mm256_add_ps(data, other.data) };
@@ -278,7 +314,7 @@ inline ColourVec fma(const ColourVec &a, const ColourVec &b, const ColourVec &c)
   return { _mm256_fmadd_ps(a.data, b.data, c.data) };
 }
 inline ColourVec abs(const ColourVec &vec) {
-  return { _mm256_abs_ps(vec.data) };
+  return { _mm256_andnot_ps(_mm256_set1_ps(-0.0f), vec.data) };
 }
 #else
 #error Triangulator requires ARM NEON or AVX2 support!

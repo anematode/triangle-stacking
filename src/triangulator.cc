@@ -30,9 +30,9 @@ float horizontal_add(float32x4_t x) {
 
 BatchEvaluationResults evaluate_triangle_batched(
   const std::vector<Triangle> &candidates,
-  const Image &start,
-  const Image &colour_diff,
-  const Image &target,
+  const Image<false> &start,
+  const Image<false> &colour_diff,
+  const Image<false> &target,
   ErrorMetric norm,
   bool vectorized
 ) {
@@ -200,7 +200,7 @@ void StepStatistics::write_csv(std::ofstream &of) {
   of << std::flush;
 }
 
-std::map<ErrorMetric, float> compute_residuals(const Image &image, const Image &target) {
+std::map<ErrorMetric, float> compute_residuals(const Image<false> &image, const Image<false> &target) {
   std::map<ErrorMetric, float> result;
   auto process = [&] <ErrorMetric norm>() {
     float sum = 0;
@@ -220,8 +220,8 @@ std::map<ErrorMetric, float> compute_residuals(const Image &image, const Image &
 bool Triangulator::perturb_single(size_t i) {
   if (i + 1 >= triangles.size()) throw std::runtime_error("perturb_single: out of bounds");
 
-  Triangulator below_single(Image{target});
-  Triangulator above_single(Image{target});
+  Triangulator below_single(Image<false>{target});
+  Triangulator above_single(Image<false>{target});
 
   below_single.triangles = triangles;
   below_single.triangles.resize(i);

@@ -7,6 +7,8 @@
 #include <vector>
 #include <string>
 #include <cstring>
+#define __STDC_WANT_IEC_60559_TYPES_EXT__
+#include <float.h>
 
 #include "colour.h"
 #include "triangle.h"
@@ -50,14 +52,22 @@ struct LoadInfo {
   }
 };
 
+float half_to_float(uint16_t x);
+uint16_t float_to_half(float x);
+
+template <bool USE_FP16 = false>
 struct Image {
   int width{};
   int height{};
 
+  using DataType = std::conditional_t<USE_FP16, uint16_t, float>;
+
+  constexpr static bool USE_FP16_ = USE_FP16;
+
   std::vector<Colour> colours;
-  std::vector<float> red{};
-  std::vector<float> green{};
-  std::vector<float> blue{};
+  std::vector<DataType> red{};
+  std::vector<DataType> green{};
+  std::vector<DataType> blue{};
 
   Image() : Image(1, 1) {}
 
@@ -66,22 +76,30 @@ struct Image {
     compute_channels();
   }
 
+  static DataType to_datatype(float a) {
+    return USE_FP16 ? float_to_half(a) : a;
+  }
+
+  static float from_datatype(DataType a) {
+    return USE_FP16 ? half_to_float(a) : a;
+  }
+
   void compute_channels() {
-    auto fill = [&] (std::vector<float>& target, auto&& lambda) {
+    auto fill = [&] (std::vector<DataType>& target, auto&& lambda) {
       target.resize(size() + 32 /* padding */);
       for (int i = 0; i < size(); i++) {
         target[i] = lambda(colours[i]);
       }
     };
 
-    fill(red, [&] (Colour c) { return c.r; });
-    fill(blue, [&] (Colour c) { return c.g; });
-    fill(green, [&] (Colour c) { return c.b; });
+    fill(red, [&] (Colour c) { return to_datatype(c.r); });
+    fill(blue, [&] (Colour c) { return to_datatype(c.g); });
+    fill(green, [&] (Colour c) { return to_datatype(c.b); });
   }
 
   void compute_colours() {
     for (int i = 0; i < size(); i++) {
-      colours[i] = { red[i], green[i], blue[i], 1 };
+      colours[i] = { from_datatype(red[i]), from_datatype(green[i]), from_datatype(blue[i]), 1 };
     }
   }
 
@@ -89,17 +107,7 @@ struct Image {
     return { sf::VideoMode(width, height), "Triangulator" };
   }
 
-  static bool poll_events(sf::RenderWindow& window, bool forever = false) {
-    do {
-      if (sf::Event event; window.pollEvent(event)) {
-        if (event.type == sf::Event::Closed) {
-          window.close();
-          return true;
-        }
-      }
-    } while (forever && window.isOpen());
-    return false;
-  }
+  static bool poll_events(sf::RenderWindow& window, bool forever = false);
 
   void show(sf::RenderWindow& window) {
     // clear the window with black color
@@ -378,5 +386,8 @@ struct Image {
     return colours[y * width + x];
   }
 };
+
+
+bool poll_events(sf::RenderWindow &window, bool forever);
 
 #endif //IMAGE_H

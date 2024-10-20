@@ -6,23 +6,28 @@
 #include <array>
 #include "colour.h"
 
+template <bool USE_FP16>
 struct LoadedPixels {
   ColourVec red, green, blue;
 
-  float* __restrict__ red_addr;
-  float* __restrict__ green_addr;
-  float* __restrict__ blue_addr;
+  using ColourTy = std::conditional_t<USE_FP16, unsigned short, float>;
+
+  ColourTy* __restrict__ red_addr;
+  ColourTy* __restrict__ green_addr;
+  ColourTy* __restrict__ blue_addr;
 
   std::tuple<ColourVec, ColourVec, ColourVec> colours() const {
     return { red, green, blue };
   }
 };
 
-template <size_t N_IMAGES>
+template <size_t N_IMAGES, bool USE_FP16>
 requires (N_IMAGES > 0)
 struct LoadedPixelsSet {
   ColourMask valid_mask;
-  std::array<LoadedPixels, N_IMAGES> image_data;
+  std::array<LoadedPixels<USE_FP16>, N_IMAGES> image_data;
+
+  using ColourTy = std::conditional_t<USE_FP16, unsigned short, float>;
 
   int x, y, offs;
 
@@ -31,7 +36,7 @@ struct LoadedPixelsSet {
   void store_colour(ColourVec r, ColourVec g, ColourVec b) {
     LoadedPixels loaded = std::get<Index>(image_data);
 
-    auto store = [&] (ColourVec vec, ColourVec original, float* addr) {
+    auto store = [&] (ColourVec vec, ColourVec original, ColourTy* addr) {
 #ifdef USE_NEON
       if (MustRespectMask)
         ColourVec::select(valid_mask, vec, original).store(addr);
@@ -72,6 +77,16 @@ struct HalfPlaneCheck {
     return { fma(x, A1, fma(y, A2, B)) };
   }
 };
+
+template <typename Image>
+struct ImageTraits {
+  static constexpr bool USE_FP16_ = Image::USE_FP16_;
+};
+
+template <typename... Images>
+struct ImagesTraits {
+  static constexpr bool USE_FP16 = (ImageTraits<Images>::USE_FP16_ && ...);
+};
 }
 
 struct Triangle {
@@ -87,7 +102,7 @@ struct Triangle {
   std::string to_string(float improvement = 0.0) const;
   bool operator==(const Triangle& b) const;
 
-  template <typename L, typename... Images>
+  template <typename L, typename... Images, bool USE_FP16 = detail::ImageTraits<Images...>::USE_FP16_>
   void triangle_for_each_vectorized_impl(L&& lambda, Images&... images) {
     using namespace detail;
 
@@ -174,17 +189,19 @@ struct Triangle {
         ColourMask in_triangle_mask { _mm256_and_ps(in_triangle, in_bounds) };
 #endif
 
-        LoadedPixelsSet<sizeof...(Images)> loaded {
+        LoadedPixelsSet<sizeof...(Images), USE_FP16> loaded {
           in_triangle_mask,
           {
             std::apply(
-              [&] (auto& image) -> LoadedPixels {
-                float* red_addr = image.red.data() + y * width + x;
-                float* green_addr = image.green.data() + y * width + x;
-                float* blue_addr = image.blue.data() + y * width + x;
+              [&] (auto& image) -> LoadedPixels<USE_FP16> {
+                auto* red_addr = image.red.data() + y * width + x;
+                auto* green_addr = image.green.data() + y * width + x;
+                auto* blue_addr = image.blue.data() + y * width + x;
 
                 return {
-                  ColourVec::load(red_addr), ColourVec::load(green_addr), ColourVec::load(blue_addr),
+                  ColourVec::load(red_addr),
+                  ColourVec::load(green_addr),
+                  ColourVec::load(blue_addr),
                   red_addr, green_addr, blue_addr
                 };
               },
@@ -201,8 +218,8 @@ struct Triangle {
     }
   }
 
-  template <typename L, typename... Images>
-  requires std::is_invocable_v<L, LoadedPixelsSet<sizeof...(Images)>& >
+  template <typename L, typename... Images, bool USE_FP16 = detail::ImageTraits<Images...>::USE_FP16_>
+  requires std::is_invocable_v<L, LoadedPixelsSet<sizeof...(Images), USE_FP16>& >
   void triangle_for_each_vectorized(L&& lambda, Images&... images) const {
     Triangle t = *this;
     t.triangle_for_each_vectorized_impl(lambda, images...);

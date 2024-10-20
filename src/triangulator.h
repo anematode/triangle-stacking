@@ -36,7 +36,7 @@ struct TriangleEvaluationResult {
 //  src = (sum_ij(target - current * (1 - a)) / a) / (NUM PIXELS)
 // Hence pre-compute partial row sums of (target - current * (1 - a))
 template<bool vectorized>
-TriangleEvaluationResult find_optimal_colour(Triangle *candidate, const Image &colour_diff) {
+TriangleEvaluationResult find_optimal_colour(Triangle *candidate, const Image<false> &colour_diff) {
   int pixel_count = 0;
   Colour avg_diff = {1, 1, 1, 1};
 
@@ -110,8 +110,8 @@ TriangleEvaluationResult find_optimal_colour(Triangle *candidate, const Image &c
 }
 
 template<ErrorMetric norm, bool vectorized>
-float compute_triangle_improvement(Triangle candidate, const Image &start, const Image &colour_diff,
-                                   const Image &target) {
+float compute_triangle_improvement(Triangle candidate, const Image<false> &start, const Image<false> &colour_diff,
+                                   const Image<false> &target) {
   float improvement = 0;
 
   if constexpr (vectorized) {
@@ -188,7 +188,7 @@ float compute_triangle_improvement(Triangle candidate, const Image &start, const
 template<ErrorMetric norm, bool vectorized>
 TriangleEvaluationResult
 evaluate_triangle(
-  Triangle candidate, const Image &start, const Image &colour_diff, const Image &target
+  Triangle candidate, const Image<false> &start, const Image<false> &colour_diff, const Image<false> &target
 ) {
   TriangleEvaluationResult result = find_optimal_colour<vectorized>(&candidate, colour_diff);
   result.improvement = compute_triangle_improvement<norm, vectorized>(
@@ -208,9 +208,9 @@ struct BatchEvaluationResults {
 BatchEvaluationResults
 evaluate_triangle_batched(
   const std::vector<Triangle> &candidates,
-  const Image &start,
-  const Image &colour_diff,
-  const Image &target,
+  const Image<false> &start,
+  const Image<false> &colour_diff,
+  const Image<false> &target,
   ErrorMetric norm,
   bool vectorized);
 
@@ -279,11 +279,11 @@ struct StepStatistics {
   void write_csv(std::ofstream &of);
 };
 
-std::map<ErrorMetric, float> compute_residuals(const Image &image, const Image &target);
+std::map<ErrorMetric, float> compute_residuals(const Image<false> &image, const Image<false> &target);
 
 struct Triangulator {
-  Image target;
-  Image assembled;
+  Image<false> target;
+  Image<false> assembled;
 
   std::string input_file{};
   std::vector<Triangle> triangles{};
@@ -300,7 +300,7 @@ struct Triangulator {
                                                     input_file(input_file) {
   }
 
-  explicit Triangulator(Image &&img) : target(img), assembled(target.width, target.height) {
+  explicit Triangulator(Image<false> &&img) : target(img), assembled(target.width, target.height) {
   }
 
   /**
