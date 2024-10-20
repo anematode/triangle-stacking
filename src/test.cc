@@ -8,7 +8,11 @@
 #include "image.h"
 
 #define USE_FP16 false
+#ifdef SFML_SUPPORTED
 #define SHOW_IMAGE false
+#else
+#define SHOW_IMAGE false
+#endif
 
 __attribute__((noinline))
 void enjoy(const Triangle& triangle, Image<USE_FP16>& img) {

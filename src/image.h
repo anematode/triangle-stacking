@@ -13,7 +13,10 @@
 #include "colour.h"
 #include "triangle.h"
 
+#ifdef SFML_SUPPORTED
 #include <SFML/Graphics.hpp>
+#endif
+
 #include "3rdparty/stb_image.h"
 #include "3rdparty/stb_image_write.h"
 
@@ -103,6 +106,7 @@ struct Image {
     }
   }
 
+#ifdef SFML_SUPPORTED
   sf::RenderWindow create_window() {
     return { sf::VideoMode(width, height), "Triangulator" };
   }
@@ -135,6 +139,7 @@ struct Image {
     // end the current frame
     window.display();
   }
+#endif
 
   explicit Image(const std::string& path) {
     FILE* f = fopen(path.c_str(), "rb");

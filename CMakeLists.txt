@@ -26,12 +26,19 @@ set(SOURCE_FILES src/3rdparty/stb_image.h
 add_executable(approximating_images
         src/main.cc
         ${SOURCE_FILES})
-target_link_libraries(approximating_images PRIVATE sfml-graphics)
-
 add_executable(test
         src/test.cc
         ${SOURCE_FILES})
-target_link_libraries(test PRIVATE sfml-graphics)
+
+if (${NO_SFML})
+else()
+    target_link_libraries(approximating_images PRIVATE sfml-graphics)
+    target_link_libraries(test PRIVATE sfml-graphics)
+
+    # add SFML_SUPPORTED
+    target_compile_definitions(approximating_images PRIVATE SFML_SUPPORTED)
+    target_compile_definitions(test PRIVATE SFML_SUPPORTED)
+endif()
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     set(MACOS TRUE)

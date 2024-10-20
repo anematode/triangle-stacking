@@ -36,6 +36,7 @@ unsigned short float_to_half(const float x) { // IEEE-754 16-bit floating-point 
   return (b&0x80000000)>>16 | (e>112)*((((e-112)<<10)&0x7C00)|m>>13) | ((e<113)&(e>101))*((((0x007FF000+m)>>(125-e))+1)>>1) | (e>143)*0x7FFF; // sign : normalized : denormalized : saturate
 }
 
+#ifdef SFML_SUPPORTED
 bool poll_events(sf::RenderWindow &window, bool forever) {
   do {
     if (sf::Event event; window.pollEvent(event)) {
@@ -47,3 +48,4 @@ bool poll_events(sf::RenderWindow &window, bool forever) {
   } while (forever && window.isOpen());
   return false;
 }
+#endif
