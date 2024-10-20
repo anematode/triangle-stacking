@@ -111,8 +111,6 @@ struct Image {
     return { sf::VideoMode(width, height), "Triangulator" };
   }
 
-  static bool poll_events(sf::RenderWindow& window, bool forever = false);
-
   void show(sf::RenderWindow& window) {
     // clear the window with black color
     window.clear(sf::Color::Black);
@@ -188,24 +186,17 @@ struct Image {
   }
 
   void draw_triangle(Triangle tri) {
-    float alpha = tri.colour.a;
-
-#if 0
-    triangle_vectorized_for_each(tri, [&] (auto info) {
-      auto [ x, y, valid_mask ] = info;
-
-#ifdef USE_NEON
-
-#endif
-    });
-#endif
-
-    triangle_for_each(tri, [&] (int x, int y) {
-      int idx = y * width + x;
-
-#define COMPONENT(COMP) colours[idx].COMP = colours[idx].COMP * (1 - alpha) + tri.colour.COMP * alpha;
-      COMPONENT(r) COMPONENT(g) COMPONENT(b) COMPONENT(a)
-    });
+    auto [r, g, b, a] = tri.colour;
+    auto rs = ColourVec::all(r) * a, gs = ColourVec::all(g) * a, bs = ColourVec::all(b) * a;
+    auto a_inv = ColourVec::all(1 - a);
+    tri.triangle_for_each_vectorized([&] (LoadedPixelsSet<1, USE_FP16> loaded) {
+      auto [red, green, blue ] = loaded.image_data[0].colours();
+      loaded.template store_colour<0>(
+        fma(red, a_inv, rs),
+        fma(green, a_inv, gs),
+        fma(blue, a_inv, bs)
+      );
+    }, *this);
   }
 
   static uint8_t convert_channel(float b) {

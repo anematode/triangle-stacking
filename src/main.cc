@@ -177,9 +177,18 @@ int main(int argc, char **argv) {
 
   std::cout << triangulator->summarise(true);
 
+#ifdef SFML_SUPPORTED
+  sf::RenderWindow window = triangulator->assembled.create_window();
+#endif
+
   steady_clock::time_point start_time = steady_clock::now();
   size_t step;
   while ((step = triangulator->triangles.size()) < (size_t)triangulator->steps) {
+#ifdef SFML_SUPPORTED
+    triangulator->assembled.show(window);
+    if (poll_events(window, false)) return 0;
+#endif
+
     auto stats = triangulator->run_step(step, true, true, false, min_time, norm);
     if (stats_out)
       stats.write_csv(stats_out.value());

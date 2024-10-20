@@ -1,38 +1,11 @@
 #include "triangulator.h"
 
-#ifdef USE_AVX512
-float horizontal_add(__m512 x) {
-  return _mm512_reduce_add_ps(x);
-}
-#endif
-
-#ifdef USE_AVX
-// Credit: https://stackoverflow.com/a/13222410/13458117
-float horizontal_add(__m256 x) {
-  const __m128 hi_quad = _mm256_extractf128_ps(x, 1);
-  const __m128 lo_quad = _mm256_castps256_ps128(x);
-  const __m128 sum_quad = _mm_add_ps(lo_quad, hi_quad);
-  const __m128 lo_dual = sum_quad;
-  const __m128 hi_dual = _mm_movehl_ps(sum_quad, sum_quad);
-  const __m128 sum_dual = _mm_add_ps(lo_dual, hi_dual);
-  const __m128 lo = sum_dual;
-  const __m128 hi = _mm_shuffle_ps(sum_dual, sum_dual, 0x1);
-  const __m128 sum = _mm_add_ss(lo, hi);
-  return _mm_cvtss_f32(sum);
-}
-#endif
-
-#ifdef USE_NEON
-float horizontal_add(float32x4_t x) {
-  return vaddvq_f32(x);
-}
-#endif
 
 BatchEvaluationResults evaluate_triangle_batched(
   const std::vector<Triangle> &candidates,
-  const Image<false> &start,
-  const Image<false> &colour_diff,
-  const Image<false> &target,
+  Image<false> &start,
+  Image<false> &colour_diff,
+  Image<false> &target,
   ErrorMetric norm,
   bool vectorized
 ) {
@@ -349,7 +322,7 @@ void Triangulator::assemble(Colour background) {
   std::fill(assembled.colours.begin(), assembled.colours.end(), background);
   for (const auto &triangle: triangles)
     assembled.draw_triangle(triangle);
-  assembled.compute_channels();
+  assembled.compute_colours();
 }
 
 void Triangulator::save_to_state(const std::string &path) const {

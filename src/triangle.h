@@ -81,12 +81,12 @@ struct HalfPlaneCheck {
 
 template <typename Image>
 struct ImageTraits {
-  static constexpr bool USE_FP16_ = Image::USE_FP16_;
+  static constexpr bool USE_FP16 = Image::USE_FP16_;
 };
 
 template <typename... Images>
 struct ImagesTraits {
-  static constexpr bool USE_FP16 = (ImageTraits<Images>::USE_FP16_ && ...);
+  static constexpr bool USE_FP16 = (ImageTraits<Images>::USE_FP16 && ...);
 };
 }
 
@@ -103,7 +103,7 @@ struct Triangle {
   std::string to_string(float improvement = 0.0) const;
   bool operator==(const Triangle& b) const;
 
-  template <typename L, typename... Images, bool USE_FP16 = detail::ImageTraits<Images...>::USE_FP16_>
+  template <typename L, typename... Images, bool USE_FP16 = detail::ImagesTraits<Images...>::USE_FP16>
   void triangle_for_each_vectorized_impl(L&& lambda, Images&... images) {
     using namespace detail;
 
@@ -199,21 +199,18 @@ struct Triangle {
         LoadedPixelsSet<sizeof...(Images), USE_FP16> loaded {
           in_triangle_mask,
           {
-            std::apply(
-              [&] (auto& image) -> LoadedPixels<USE_FP16> {
-                auto* red_addr = image.red.data() + y * width + x;
-                auto* green_addr = image.green.data() + y * width + x;
-                auto* blue_addr = image.blue.data() + y * width + x;
+            ([&] (auto& image) -> LoadedPixels<USE_FP16> {
+              auto* red_addr = image.red.data() + y * width + x;
+              auto* green_addr = image.green.data() + y * width + x;
+              auto* blue_addr = image.blue.data() + y * width + x;
 
-                return {
-                  ColourVec::load(red_addr),
-                  ColourVec::load(green_addr),
-                  ColourVec::load(blue_addr),
-                  red_addr, green_addr, blue_addr
-                };
-              },
-              std::forward_as_tuple(images...)
-            )
+              return {
+                ColourVec::load(red_addr),
+                ColourVec::load(green_addr),
+                ColourVec::load(blue_addr),
+                red_addr, green_addr, blue_addr
+              };
+            })(images)...
           },
           x,
           y,
@@ -225,7 +222,7 @@ struct Triangle {
     }
   }
 
-  template <typename L, typename... Images, bool USE_FP16 = detail::ImageTraits<Images...>::USE_FP16_>
+  template <typename L, typename... Images, bool USE_FP16 = detail::ImagesTraits<Images...>::USE_FP16>
   requires std::is_invocable_v<L, LoadedPixelsSet<sizeof...(Images), USE_FP16>& >
   void triangle_for_each_vectorized(L&& lambda, Images&... images) const {
     Triangle t = *this;

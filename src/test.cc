@@ -9,7 +9,7 @@
 
 #define USE_FP16 true
 #ifdef SFML_SUPPORTED
-#define SHOW_IMAGE false
+#define SHOW_IMAGE true
 #else
 #define SHOW_IMAGE false
 #endif
@@ -31,7 +31,7 @@ void enjoy(const Triangle& triangle, Image<USE_FP16>& img) {
 
 int main() {
   using namespace std::chrono;
-  Image<USE_FP16> img { 1920, 1080 };
+  Image<USE_FP16> img { 640, 480 };
 
   Triangle triangle { 500, 10, 10, 50, 100, 150, { 1, 1, 1, 1 } };
 

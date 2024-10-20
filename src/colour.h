@@ -34,6 +34,9 @@ struct ColourMask {
   ColourMask operator|(const ColourMask &other) const {
     return { vorrq_u32(data, other.data) };
   }
+  unsigned popcount() const {
+    return -vaddvq_u32(data);
+  }
 };
 
 struct ColourVec {
@@ -109,6 +112,9 @@ struct ColourVec {
   ColourVec operator|(const ColourMask &mask) const {
     return { vreinterpretq_f32_u32(vorrq_u32(vreinterpretq_u32_f32(data), mask.data)) };
   }
+  float horizontal_add() const {
+    return vaddvq_f32(data);
+  }
 };
 inline ColourVec sqrt(const ColourVec &vec) {
   return { vsqrtq_f32(vec.data) };
@@ -140,6 +146,9 @@ struct ColourMask {
   }
   ColourMask operator|(const ColourMask &other) const {
     return { data | other.data };
+  }
+  unsigned popcount() const {
+    return __builtin_popcount(data);
   }
 };
 
@@ -206,6 +215,9 @@ struct ColourVec {
   }
   ColourMask operator<=(const ColourVec &other) const {
     return { _mm512_cmp_ps_mask(data, other.data, _CMP_LE_OQ) };
+  }
+  float horizontal_add() const {
+    return _mm512_reduce_add_ps(data);
   }
 };
 inline ColourVec sqrt(const ColourVec &vec) {
@@ -306,6 +318,14 @@ struct ColourVec {
   ColourMask operator<=(const ColourVec &other) const {
     return { _mm256_cmp_ps(data, other.data, _CMP_LE_OQ) };
   }
+  float horizontal_add() const {
+    float s[8];
+    _mm256_storeu_ps(s, data);
+    return s[0] + s[1] + s[2] + s[3] + s[4] + s[5] + s[6] + s[7];
+  }
+  unsigned popcount() const {
+    return __builtin_popcount(_mm256_movemask_ps(data));
+  }
 };
 inline ColourVec sqrt(const ColourVec &vec) {
   return { _mm256_sqrt_ps(vec.data) };
@@ -388,7 +408,7 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
   }
 
 #ifdef USE_NEON
-  if constexpr (std::is_same_v<Data, float32x4_t>) {
+  if constexpr (std::is_convertible_v<Data, float32x4_t>) {
     float32x4_t dr = vsubq_f32(r1, r2), dg = vsubq_f32(g1, g2), db = vsubq_f32(b1, b2);
     if (norm == ErrorMetric::L1 || norm == ErrorMetric::L3) {
       dr = vabsq_f32(dr);
@@ -397,9 +417,9 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
     }
     float32x4_t dr2 = vmulq_f32(dr, dr), dg2 = vmulq_f32(dg, dg), db2 = vmulq_f32(db, db);
     switch (norm) {
-      case ErrorMetric::L2: return vsqrtq_f32(vaddq_f32(vaddq_f32(dr2, dg2), db2));
-      case ErrorMetric::L2_Squared: return vaddq_f32(vaddq_f32(dr2, dg2), db2);
-      case ErrorMetric::L1: return vaddq_f32(vaddq_f32(dr, dg), db);
+      case ErrorMetric::L2: return { vsqrtq_f32(vaddq_f32(vaddq_f32(dr2, dg2), db2)) };
+      case ErrorMetric::L2_Squared: return { vaddq_f32(vaddq_f32(dr2, dg2), db2) };
+      case ErrorMetric::L1: return { vaddq_f32(vaddq_f32(dr, dg), db) };
       case ErrorMetric::L3:
       case ErrorMetric::L4:
         break;
@@ -408,12 +428,12 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
         auto dr2_coeff = vfmaq_f32(vdupq_n_f32(2), rmean, vdupq_n_f32(1.f / 256.f));
         auto db2_coeff = vfmaq_f32(vdupq_n_f32(2.0f + 255.0f / 256.0f), rmean, vdupq_n_f32(-1.f / 256.f));
         auto result = vfmaq_f32(vfmaq_f32(vmulq_f32(dr2_coeff, dr2), dg2, vdupq_n_f32(4)), db2, db2_coeff);
-        return vsqrtq_f32(result);
+        return { vsqrtq_f32(result) };
       }
     }
   }
 #elif defined(USE_AVX512)
-  if constexpr (std::is_same_v<Data, __m512>) {
+  if constexpr (std::is_convertible_v<Data, __m512>) {
     __m512 dr = _mm512_sub_ps(r1, r2), dg = _mm512_sub_ps(g1, g2), db = _mm512_sub_ps(b1, b2);
     if (norm == ErrorMetric::L1 || norm == ErrorMetric::L3) {
       dr = _mm512_abs_ps(dr); dg = _mm512_abs_ps(dg); db = _mm512_abs_ps(db);
@@ -421,9 +441,9 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
     __m512 dr2 = _mm512_mul_ps(dr, dr), dg2 = _mm512_mul_ps(dg, dg), db2 = _mm512_mul_ps(db, db);
 
     switch (norm) {
-      case ErrorMetric::L2: return _mm512_sqrt_ps(_mm512_add_ps(_mm512_add_ps(dr2, dg2), db2));
-      case ErrorMetric::L2_Squared: return _mm512_add_ps(_mm512_add_ps(dr2, dg2), db2);
-      case ErrorMetric::L1: return _mm512_add_ps(_mm512_add_ps(dr, dg), db);
+      case ErrorMetric::L2: return { _mm512_sqrt_ps(_mm512_add_ps(_mm512_add_ps(dr2, dg2), db2)) };
+      case ErrorMetric::L2_Squared: return { _mm512_add_ps(_mm512_add_ps(dr2, dg2), db2) };
+      case ErrorMetric::L1: return { _mm512_add_ps(_mm512_add_ps(dr, dg), db) };
       case ErrorMetric::L3:
       case ErrorMetric::L4:
         break;
@@ -434,12 +454,12 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
         __m512 db2_coeff = _mm512_fmadd_ps(avg_r, _mm512_set1_ps(-1.f / 256.f), _mm512_set1_ps(2 + 255.f / 256.f));
 
         __m512 result = _mm512_sqrt_ps(_mm512_fmadd_ps(dr2_coeff, dr2, _mm512_fmadd_ps(dg2, _mm512_set1_ps(4), _mm512_mul_ps(db2_coeff, db2))));
-        return result;
+        return { result };
       }
     }
   }
 #else
-  if constexpr (std::is_same_v<Data, __m256>) {
+  if constexpr (std::is_convertible_v<Data, __m256>) {
     __m256 dr = _mm256_sub_ps(r1, r2), dg = _mm256_sub_ps(g1, g2), db = _mm256_sub_ps(b1, b2);
     if (norm == ErrorMetric::L1 || norm == ErrorMetric::L3) {
       dr = _mm256_andnot_ps(_mm256_set1_ps(-0.0f), dr);
@@ -450,9 +470,9 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
     __m256 dr2 = _mm256_mul_ps(dr, dr), dg2 = _mm256_mul_ps(dg, dg), db2 = _mm256_mul_ps(db, db);
 
     switch (norm) {
-      case ErrorMetric::L2: return _mm256_sqrt_ps(_mm256_add_ps(_mm256_add_ps(dr2, dg2), db2));
-      case ErrorMetric::L2_Squared: return _mm256_add_ps(_mm256_add_ps(dr2, dg2), db2);
-      case ErrorMetric::L1: return _mm256_add_ps(_mm256_add_ps(dr, dg), db);
+      case ErrorMetric::L2: return { _mm256_sqrt_ps(_mm256_add_ps(_mm256_add_ps(dr2, dg2), db2)) };
+      case ErrorMetric::L2_Squared: return { _mm256_add_ps(_mm256_add_ps(dr2, dg2), db2) };
+      case ErrorMetric::L1: return { _mm256_add_ps(_mm256_add_ps(dr, dg), db) };
       case ErrorMetric::L3:
       case ErrorMetric::L4:
         break;
@@ -461,7 +481,7 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
         __m256 dr2_coeff = _mm256_fmadd_ps(avg_r, _mm256_set1_ps(1.f / 256.f), _mm256_set1_ps(2));
         __m256 db2_coeff = _mm256_fmadd_ps(avg_r, _mm256_set1_ps(-1.f / 256.f), _mm256_set1_ps(2 + 255.f / 256.f));
         __m256 result = _mm256_sqrt_ps(_mm256_fmadd_ps(dr2_coeff, dr2, _mm256_fmadd_ps(dg2, _mm256_set1_ps(4), _mm256_mul_ps(db2_coeff, db2))));
-        return result;
+        return { result };
       }
     }
   }

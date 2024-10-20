@@ -17,13 +17,6 @@ constexpr float TRI_ALPHA = 0.5;
 const int PERTURBATION_STEPS = 50;
 const int PERTURBATION_GENERATION_SIZE = 100;
 
-#ifdef USE_AVX512
-float horizontal_add(__m512 x);
-#elif defined(USE_AVX)
-float horizontal_add(__m256 x);
-#else
-float horizontal_add(float32x4_t x);
-#endif
 
 struct TriangleEvaluationResult {
   float improvement;
@@ -36,56 +29,24 @@ struct TriangleEvaluationResult {
 //  src = (sum_ij(target - current * (1 - a)) / a) / (NUM PIXELS)
 // Hence pre-compute partial row sums of (target - current * (1 - a))
 template<bool vectorized>
-TriangleEvaluationResult find_optimal_colour(Triangle *candidate, const Image<false> &colour_diff) {
+TriangleEvaluationResult find_optimal_colour(Triangle *candidate, Image<false> &colour_diff) {
   int pixel_count = 0;
   Colour avg_diff = {1, 1, 1, 1};
 
   if constexpr (vectorized) {
-#ifdef USE_NEON
-    float32x4_t rrrr = vdupq_n_f32(0), gggg = rrrr, bbbb = rrrr;
-#elif defined(USE_AVX512)
-    __m512 rrrr = _mm512_setzero_ps(), gggg = rrrr, bbbb = rrrr;
-#else
-    __m256 rrrr = _mm256_setzero_ps(), gggg = rrrr, bbbb = rrrr;
-#endif
+    ColourVec rrrr = ColourVec::all(0), gggg = rrrr, bbbb = rrrr;
 
-    colour_diff.triangle_vectorized_for_each(*candidate, [&](auto info) {
-      auto [x, y, valid_mask] = info;
-      int offs = y * colour_diff.width + x;
+    candidate->triangle_for_each_vectorized([&](LoadedPixelsSet<1, false> info) {
+      rrrr += info.image_data[0].red;
+      gggg += info.image_data[0].green;
+      bbbb += info.image_data[0].blue;
 
-#ifdef USE_NEON
-#define LOAD_COMPONENT(img, comp) vreinterpretq_u32_f32(vandq_u32(valid_mask.mask,                                     \
-  vreinterpretq_f32_u32(vld1q_f32(img.comp.data() + offs))))
+      pixel_count += info.valid_mask.popcount();
+    }, colour_diff);
 
-      rrrr = vaddq_f32(rrrr, LOAD_COMPONENT(colour_diff, red));
-      gggg = vaddq_f32(gggg, LOAD_COMPONENT(colour_diff, blue));
-      bbbb = vaddq_f32(bbbb, LOAD_COMPONENT(colour_diff, green));
-
-      pixel_count += -vaddvq_u32(valid_mask.mask);
-#elif defined(USE_AVX512)
-#define LOAD_COMPONENT(img, comp) _mm512_maskz_loadu_ps(valid_mask, img.comp.data() + offs)
-#define ACCUMULATE_COMPONENT(vec, img, comp) \
-      vec = _mm512_mask_add_ps(vec, valid_mask, vec, LOAD_COMPONENT(img, comp))
-
-      ACCUMULATE_COMPONENT(rrrr, colour_diff, red);
-      ACCUMULATE_COMPONENT(gggg, colour_diff, blue);
-      ACCUMULATE_COMPONENT(bbbb, colour_diff, green);
-
-      pixel_count += std::popcount((unsigned) valid_mask);
-#else
-#define LOAD_COMPONENT(img, comp) _mm256_maskload_ps(img.comp.data() + offs, _mm256_castps_si256(valid_mask.mask))
-
-      rrrr = _mm256_add_ps(rrrr, LOAD_COMPONENT(colour_diff, red));
-      gggg = _mm256_add_ps(gggg, LOAD_COMPONENT(colour_diff, blue));
-      bbbb = _mm256_add_ps(bbbb, LOAD_COMPONENT(colour_diff, green));
-
-      pixel_count += std::popcount((unsigned) _mm256_movemask_ps(valid_mask.mask));
-#endif
-    });
-
-    avg_diff.r = horizontal_add(rrrr);
-    avg_diff.g = horizontal_add(gggg);
-    avg_diff.b = horizontal_add(bbbb);
+    avg_diff.r = rrrr.horizontal_add();
+    avg_diff.g = gggg.horizontal_add();
+    avg_diff.b = bbbb.horizontal_add();
   } else {
     // !vectorized
     colour_diff.triangle_for_each(*candidate, [&](int x, int y) {
@@ -110,69 +71,33 @@ TriangleEvaluationResult find_optimal_colour(Triangle *candidate, const Image<fa
 }
 
 template<ErrorMetric norm, bool vectorized>
-float compute_triangle_improvement(Triangle candidate, const Image<false> &start, const Image<false> &colour_diff,
-                                   const Image<false> &target) {
+float compute_triangle_improvement(Triangle candidate, Image<false> &start, Image<false> &colour_diff, Image<false> &target) {
   float improvement = 0;
 
   if constexpr (vectorized) {
-#ifdef USE_NEON
-    float32x4_t improvement_v = vdupq_n_f32(0);
-    float32x4_t alpha_inv = vdupq_n_f32(1 - TRI_ALPHA), alpha = vdupq_n_f32(TRI_ALPHA);
-    float32x4_t candidate_red = vdupq_n_f32(candidate.colour.r);
-    float32x4_t candidate_green = vdupq_n_f32(candidate.colour.g);
-    float32x4_t candidate_blue = vdupq_n_f32(candidate.colour.b);
-#elif defined(USE_AVX512)
-    __m512 improvement_v = _mm512_setzero_ps();
-    __m512 alpha_inv = _mm512_set1_ps(1 - TRI_ALPHA), alpha = _mm512_set1_ps(TRI_ALPHA);
-    __m512 candidate_red = _mm512_set1_ps(candidate.colour.r);
-    __m512 candidate_green = _mm512_set1_ps(candidate.colour.g);
-    __m512 candidate_blue = _mm512_set1_ps(candidate.colour.b);
-#else
-    __m256 improvement_v = _mm256_setzero_ps();
-    __m256 alpha_inv = _mm256_set1_ps(1 - TRI_ALPHA), alpha = _mm256_set1_ps(TRI_ALPHA);
-    __m256 candidate_red = _mm256_set1_ps(candidate.colour.r);
-    __m256 candidate_green = _mm256_set1_ps(candidate.colour.g);
-    __m256 candidate_blue = _mm256_set1_ps(candidate.colour.b);
-#endif
+    auto improvement_v = ColourVec::all(0);
+    auto alpha_inv = ColourVec::all(1 - TRI_ALPHA), alpha = ColourVec::all(TRI_ALPHA);
 
-    colour_diff.triangle_vectorized_for_each(candidate, [&](auto info) {
-      auto [x, y, valid_mask] = info;
-      int offs = y * colour_diff.width + x;
+    auto candidate_red = ColourVec::all(candidate.colour.r);
+    auto candidate_green = ColourVec::all(candidate.colour.g);
+    auto candidate_blue = ColourVec::all(candidate.colour.b);
 
-#ifdef USE_NEON
-#define COMPUTE_COMPONENT(comp) \
-      float32x4_t st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
-      float32x4_t result_##comp = vfmaq_f32(vmulq_f32(alpha, candidate_##comp), st_##comp, alpha_inv);
-#elif defined(USE_AVX512)
-#define COMPUTE_COMPONENT(comp) \
-      __m512 st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
-      __m512 result_##comp = _mm512_fmadd_ps(st_##comp, alpha_inv, _mm512_mul_ps(alpha, candidate_##comp));
-#else
-#define COMPUTE_COMPONENT(comp) \
-      __m256 st_##comp = LOAD_COMPONENT(start, comp), ta_##comp = LOAD_COMPONENT(target, comp); \
-      __m256 result_##comp = _mm256_fmadd_ps(st_##comp, alpha_inv, _mm256_mul_ps(alpha, candidate_##comp));
-#endif
-
-      COMPUTE_COMPONENT(red);
-      COMPUTE_COMPONENT(blue);
-      COMPUTE_COMPONENT(green);
+    candidate.triangle_for_each_vectorized([&](LoadedPixelsSet<2, false> info) {
+      auto& start = info.image_data[0], &target = info.image_data[1];
+      auto st_red = start.red, st_green = start.green, st_blue = start.blue;
+      auto ta_red = target.red, ta_green = target.green, ta_blue = target.blue;
+      auto result_red = fma(st_red, alpha_inv, candidate_red * alpha);
+      auto result_green = fma(st_green, alpha_inv, candidate_green * alpha);
+      auto result_blue = fma(st_blue, alpha_inv, candidate_blue * alpha);
 
       auto new_error = evaluate_norm<decltype(result_red), norm>(result_red, result_green, result_blue, ta_red,
                                                                  ta_green, ta_blue);
       auto old_error = evaluate_norm<decltype(result_red), norm>(st_red, st_green, st_blue, ta_red, ta_green, ta_blue);
 
-#ifdef USE_NEON
-      improvement_v = vaddq_f32(improvement_v, vandq_u32(vsubq_f32(new_error, old_error), valid_mask.mask));
-#elif defined(USE_AVX512)
-      improvement_v = _mm512_mask_add_ps(improvement_v, valid_mask, improvement_v, _mm512_sub_ps(new_error, old_error));
-#else
-      improvement_v = _mm256_add_ps(improvement_v, _mm256_and_ps(_mm256_sub_ps(new_error, old_error), valid_mask.mask));
-#endif
+      improvement_v = ColourVec::select(info.valid_mask, improvement_v + new_error - old_error, improvement_v);
+    }, start, target);
 
-#undef COMPUTE_COMPONENT
-    });
-
-    improvement = horizontal_add(improvement_v);
+    improvement = improvement_v.horizontal_add();
   } else {
     colour_diff.triangle_for_each(candidate, [&](int x, int y) {
       Colour result = start(x, y) * (1 - TRI_ALPHA) + candidate.colour * TRI_ALPHA;
@@ -188,7 +113,7 @@ float compute_triangle_improvement(Triangle candidate, const Image<false> &start
 template<ErrorMetric norm, bool vectorized>
 TriangleEvaluationResult
 evaluate_triangle(
-  Triangle candidate, const Image<false> &start, const Image<false> &colour_diff, const Image<false> &target
+  Triangle candidate, Image<false> &start, Image<false> &colour_diff, Image<false> &target
 ) {
   TriangleEvaluationResult result = find_optimal_colour<vectorized>(&candidate, colour_diff);
   result.improvement = compute_triangle_improvement<norm, vectorized>(
