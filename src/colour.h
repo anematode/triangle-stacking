@@ -251,6 +251,9 @@ struct ColourMask {
   bool get_index(size_t i) const {
     return _mm256_movemask_ps(data) & (1 << i);
   }
+  unsigned popcount() const {
+    return __builtin_popcount(_mm256_movemask_ps(data));
+  }
 };
 
 struct ColourVec {
