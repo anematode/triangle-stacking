@@ -218,7 +218,7 @@ std::map<ErrorMetric, float> compute_residuals(const Image &image, const Image &
 }
 
 bool Triangulator::perturb_single(size_t i) {
-  if (i < 0 || i + 1 >= triangles.size()) throw std::runtime_error("perturb_single: out of bounds");
+  if (i + 1 >= triangles.size()) throw std::runtime_error("perturb_single: out of bounds");
 
   Triangulator below_single(Image{target});
   Triangulator above_single(Image{target});
@@ -296,11 +296,15 @@ bool Triangulator::perturb_single(size_t i) {
     perturbed = std::move(perturbed_sorted);
   }
 
-  bool changed = triangles[i] != best; {
+  // std::cout << "BEST: " << best_improvement << '\n';
+
+  bool changed = triangles[i] != best;
+  {
     std::unique_lock lock{*write_perturbed};
     triangles[i] = best;
     assemble();
   }
+
   return changed;
 }
 

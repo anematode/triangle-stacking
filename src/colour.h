@@ -8,16 +8,281 @@
 #ifdef __ARM_NEON__
 #define USE_NEON
 #include <arm_neon.h>
+
+struct ColourMask {
+  uint32x4_t data;
+  bool get_index(size_t i) const {
+    switch (i) {
+      case 0: return vgetq_lane_u32(data, 0);
+      case 1: return vgetq_lane_u32(data, 1);
+      case 2: return vgetq_lane_u32(data, 2);
+      case 3: return vgetq_lane_u32(data, 3);
+      default: abort();
+    }
+  }
+
+  operator uint32x4_t() const {
+    return data;
+  }
+
+  ColourMask operator&(const ColourMask &other) const {
+    return { vandq_u32(data, other.data) };
+  }
+  ColourMask operator~() const {
+    return { vmvnq_u32(data) };
+  }
+  ColourMask operator|(const ColourMask &other) const {
+    return { vorrq_u32(data, other.data) };
+  }
+};
+
+struct ColourVec {
+  float32x4_t data;
+  static constexpr size_t ELEMENTS = 4;
+  static ColourVec all(float val) {
+    return { vdupq_n_f32(val) };
+  }
+  operator float32x4_t() const {
+    return data;
+  }
+  static ColourVec and_(ColourVec c1, ColourVec c2) {
+    return { vreinterpretq_f32_u32(vandq_u32(vreinterpretq_u32_f32(c1.data), vreinterpretq_u32_f32(c2.data))) };
+  }
+  static ColourVec load(float* ptr) {
+    return { vld1q_f32(ptr) };
+  }
+  static ColourVec select(ColourMask mask, ColourVec a, ColourVec b) {
+    return { vbslq_f32(mask.data, a.data, b.data) };
+  }
+  void store(float* ptr) const {
+    vst1q_f32(ptr, data);
+  }
+  void masked_store(float* ptr, ColourMask mask) const {
+    vst1q_f32(ptr, vbslq_f32(mask.data, data, vld1q_f32(ptr)));
+  }
+  ColourVec operator+(const ColourVec &other) const {
+    return { vaddq_f32(data, other.data) };
+  }
+  ColourVec operator+=(const ColourVec &other) {
+    data = vaddq_f32(data, other.data);
+    return *this;
+  }
+  ColourVec negate() const {
+    return { vnegq_f32(data) };
+  }
+  ColourVec operator-(const ColourVec &other) const {
+    return { vsubq_f32(data, other.data) };
+  }
+  ColourVec operator*(const ColourVec &other) const {
+    return { vmulq_f32(data, other.data) };
+  }
+  ColourVec operator*(float scalar) const {
+    return { vmulq_n_f32(data, scalar) };
+  }
+  ColourMask operator<(const ColourVec &other) const {
+    return { vcltq_f32(data, other.data) };
+  }
+  ColourMask operator>(const ColourVec &other) const {
+    return { vcgtq_f32(data, other.data) };
+  }
+  ColourMask operator>=(const ColourVec &other) const {
+    return { vcgeq_f32(data, other.data) };
+  }
+  ColourMask operator<=(const ColourVec &other) const {
+    return { vcleq_f32(data, other.data) };
+  }
+  ColourVec operator&(const ColourMask &mask) const {
+    return { vreinterpretq_f32_u32(vandq_u32(vreinterpretq_u32_f32(data), mask.data)) };
+  }
+  ColourVec operator|(const ColourMask &mask) const {
+    return { vreinterpretq_f32_u32(vorrq_u32(vreinterpretq_u32_f32(data), mask.data)) };
+  }
+};
+inline ColourVec sqrt(const ColourVec &vec) {
+  return { vsqrtq_f32(vec.data) };
+}
+inline ColourVec fma(const ColourVec &a, const ColourVec &b, const ColourVec &c) {
+  return { vfmaq_f32(c.data, a.data, b.data) };
+}
+inline ColourVec abs(const ColourVec &vec) {
+  return { vabsq_f32(vec.data) };
+}
 #elif defined(__AVX512F__)
 #define USE_AVX512
 #include <immintrin.h>
+
+struct ColourMask {
+  __mmask16 data;
+
+  operator __mmask16() const {
+    return data;
+  }
+  bool get_index(size_t i) const {
+    return data & (1 << i);
+  }
+  ColourMask operator&(const ColourMask &other) const {
+    return { data & other.data };
+  }
+  ColourMask operator~() const {
+    return { ~data };
+  }
+  ColourMask operator|(const ColourMask &other) const {
+    return { data | other.data };
+  }
+}
+
+struct ColourVec {
+  __m512 data;
+  static constexpr size_t ELEMENTS = 16;
+  operator __m512() const {
+    return data;
+  }
+  static ColourVec all(float val) {
+    return { _mm512_set1_ps(val) };
+  }
+  static ColourVec load(float* ptr) {
+    return { _mm512_loadu_ps(ptr) };
+  }
+  static ColourVec select(ColourMask mask, ColourVec a, ColourVec b) {
+    return { _mm512_mask_blend_ps(mask, b.data, a.data) };
+  }
+  void store(float* ptr) const {
+    _mm512_storeu_ps(ptr, data);
+  }
+  void masked_store(float* ptr, ColourMask mask) const {
+    _mm512_mask_storeu_ps(ptr, mask, data);
+  }
+  ColourVec operator+(const ColourVec &other) const {
+    return { _mm512_add_ps(data, other.data) };
+  }
+  ColourVec operator+=(const ColourVec &other) {
+    data = _mm512_add_ps(data, other.data);
+    return *this;
+  }
+  ColourVec negate() const {
+    return { _mm512_xor_ps(data, _mm512_set1_ps(-0.0f)) };
+  }
+  ColourVec operator-(const ColourVec &other) const {
+    return { _mm512_sub_ps(data, other.data) };
+  }
+  ColourVec operator*(const ColourVec &other) const {
+    return { _mm512_mul_ps(data, other.data) };
+  }
+  ColourVec operator*(float scalar) const {
+    return { _mm512_mul_ps(data, _mm512_set1_ps(scalar)) };
+  }
+  ColourMask operator<(const ColourVec &other) const {
+    return _mm512_cmp_ps_mask(data, other.data, _CMP_LT_OQ);
+  }
+  ColourMask operator>(const ColourVec &other) const {
+    return _mm512_cmp_ps_mask(data, other.data, _CMP_GT_OQ);
+  }
+  ColourMask operator>=(const ColourVec &other) const {
+    return _mm512_cmp_ps_mask(data, other.data, _CMP_GE_OQ);
+  }
+  ColourMask operator<=(const ColourVec &other) const {
+    return _mm512_cmp_ps_mask(data, other.data, _CMP_LE_OQ);
+  }
+};
+inline ColourVec sqrt(const ColourVec &vec) {
+  return { _mm512_sqrt_ps(vec.data) };
+}
+inline ColourVec fma(const ColourVec &a, const ColourVec &b, const ColourVec &c) {
+  return { _mm512_fmadd_ps(a.data, b.data, c.data) };
+}
+inline ColourVec abs(const ColourVec &vec) {
+  return { _mm512_abs_ps(vec.data) };
+}
 #elif defined(__AVX2__)
 #define USE_AVX
 #include <immintrin.h>
+
+struct ColourMask {
+  __m256 data;
+
+  operator __m256() const {
+    return data;
+  }
+  ColourMask operator&(const ColourMask &other) const {
+    return { _mm256_and_ps(data, other.data) };
+  }
+  ColourMask operator~() const {
+    return { _mm256_andnot_ps(data, _mm256_set1_ps(-0.0f)) };
+  }
+  ColourMask operator|(const ColourMask &other) const {
+    return { _mm256_or_ps(data, other.data) };
+  }
+  bool get_index(size_t i) const {
+    return _mm256_movemask_ps(data) & (1 << i);
+  }
+};
+
+struct ColourVec {
+  __m256 data;
+  static constexpr size_t ELEMENTS = 8;
+  operator __m256() const {
+    return data;
+  }
+  static ColourVec all(float val) {
+    return { _mm256_set1_ps(val) };
+  }
+  static ColourVec load(float* ptr) {
+    return { _mm256_loadu_ps(ptr) };
+  }
+  static ColourVec select(ColourMask mask, ColourVec a, ColourVec b) {
+    return { _mm256_blendv_ps(b.data, a.data, mask.data) };
+  }
+  void store(float* ptr) const {
+    _mm256_storeu_ps(ptr, data);
+  }
+  void masked_store(float* ptr, ColourMask mask) const {
+    // slow on Zen 2 tho
+    _mm256_maskstore_ps(ptr, mask, data);
+  }
+  ColourVec operator+(const ColourVec &other) const {
+    return { _mm256_add_ps(data, other.data) };
+  }
+  ColourVec operator+=(const ColourVec &other) {
+    data = _mm256_add_ps(data, other.data);
+    return *this;
+  }
+  ColourVec negate() const {
+    return { _mm256_xor_ps(data, _mm256_set1_ps(-0.0f)) };
+  }
+  ColourVec operator-(const ColourVec &other) const {
+    return { _mm256_sub_ps(data, other.data) };
+  }
+  ColourVec operator*(const ColourVec &other) const {
+    return { _mm256_mul_ps(data, other.data) };
+  }
+  ColourVec operator*(float scalar) const {
+    return { _mm256_mul_ps(data, _mm256_set1_ps(scalar)) };
+  }
+  ColourMask operator<(const ColourVec &other) const {
+    return { _mm256_cmp_ps(data, other.data, _CMP_LT_OQ) };
+  }
+  ColourMask operator>(const ColourVec &other) const {
+    return { _mm256_cmp_ps(data, other.data, _CMP_GT_OQ) };
+  }
+  ColourMask operator>=(const ColourVec &other) const {
+    return { _mm256_cmp_ps(data, other.data, _CMP_GE_OQ) };
+  }
+  ColourMask operator<=(const ColourVec &other) const {
+    return { _mm256_cmp_ps(data, other.data, _CMP_LE_OQ) };
+  }
+};
+inline ColourVec sqrt(const ColourVec &vec) {
+  return { _mm256_sqrt_ps(vec.data) };
+}
+inline ColourVec fma(const ColourVec &a, const ColourVec &b, const ColourVec &c) {
+  return { _mm256_fmadd_ps(a.data, b.data, c.data) };
+}
+inline ColourVec abs(const ColourVec &vec) {
+  return { _mm256_abs_ps(vec.data) };
+}
 #else
 #error Triangulator requires ARM NEON or AVX2 support!
 #endif
-
 
 /**
  * British color

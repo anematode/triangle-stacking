@@ -205,10 +205,23 @@ int main(int argc, char **argv) {
   }
 
   if (final_perturb) {
-    int S = triangulator->triangles.size();
-    for (int i = S - 2; i >= 0; --i) {
-      triangulator->perturb_single(i);
-      std::cout << "Perturbed triangle " << i << '\n';
+    for (int j = 0; j < 20; ++j) {
+      int S = triangulator->triangles.size();
+      for (int i = S - 2; i >= 0; --i) {
+        float original = compute_residuals(triangulator->assembled,
+          triangulator->target)[ErrorMetric::L2_Squared];
+
+        std::cout << "Perturbed triangle " << i << '\n';
+        std::cout << "Residual: " << original << '\n';
+
+        auto existing = triangulator->triangles[i];
+
+        triangulator->perturb_single(i);
+
+        if (compute_residuals(triangulator->assembled, triangulator->target)[ErrorMetric::L2_Squared] > original) {
+          triangulator->triangles[i] = existing;
+        }
+      }
     }
     triangulator->save_to_state(save_state_file);
   }

@@ -31,7 +31,6 @@ struct TriangleEvaluationResult {
   long pixels_evaluated;
 };
 
-
 // target = current * (1 - a) + src * a
 // Fix a, want to minimize MSE of transparent triangle
 //  src = (sum_ij(target - current * (1 - a)) / a) / (NUM PIXELS)

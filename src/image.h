@@ -11,6 +11,7 @@
 #include "colour.h"
 #include "triangle.h"
 
+#include <SFML/Graphics.hpp>
 #include "3rdparty/stb_image.h"
 #include "3rdparty/stb_image_write.h"
 
@@ -62,6 +63,7 @@ struct Image {
 
   Image(int width, int height) : width(width), height(height), colours(size()) {
     std::fill_n(colours.begin(), size(), Colour { 0, 0, 0, 1 });
+    compute_channels();
   }
 
   void compute_channels() {
@@ -75,6 +77,55 @@ struct Image {
     fill(red, [&] (Colour c) { return c.r; });
     fill(blue, [&] (Colour c) { return c.g; });
     fill(green, [&] (Colour c) { return c.b; });
+  }
+
+  void compute_colours() {
+    for (int i = 0; i < size(); i++) {
+      colours[i] = { red[i], green[i], blue[i], 1 };
+    }
+  }
+
+  sf::RenderWindow create_window() {
+    return { sf::VideoMode(width, height), "Triangulator" };
+  }
+
+  static bool poll_events(sf::RenderWindow& window, bool forever = false) {
+    do {
+      if (sf::Event event; window.pollEvent(event)) {
+        if (event.type == sf::Event::Closed) {
+          window.close();
+          return true;
+        }
+      }
+    } while (forever && window.isOpen());
+    return false;
+  }
+
+  void show(sf::RenderWindow& window) {
+    // clear the window with black color
+    window.clear(sf::Color::Black);
+
+    sf::Image img;
+    img.create(width, height);
+
+    // draw everything here...
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        auto& c = colours[y * width + x];
+        img.setPixel(x, y, sf::Color(c.r * 255, c.g * 255, c.b * 255, c.a * 255));
+      }
+    }
+
+    sf::Texture texture;
+    texture.loadFromImage(img);
+
+    sf::Sprite sprite;
+    sprite.setTexture(texture);
+
+    window.draw(sprite);
+
+    // end the current frame
+    window.display();
   }
 
   explicit Image(const std::string& path) {
@@ -280,8 +331,19 @@ struct Image {
   void draw_triangle(Triangle tri) {
     float alpha = tri.colour.a;
 
+#if 0
+    triangle_vectorized_for_each(tri, [&] (auto info) {
+      auto [ x, y, valid_mask ] = info;
+
+#ifdef USE_NEON
+
+#endif
+    });
+#endif
+
     triangle_for_each(tri, [&] (int x, int y) {
       int idx = y * width + x;
+
 #define COMPONENT(COMP) colours[idx].COMP = colours[idx].COMP * (1 - alpha) + tri.colour.COMP * alpha;
       COMPONENT(r) COMPONENT(g) COMPONENT(b) COMPONENT(a)
     });

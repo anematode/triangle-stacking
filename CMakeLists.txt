@@ -1,11 +1,18 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.5)
 project(approximating_images)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(approximating_images
-        src/main.cc
-        src/3rdparty/stb_image.h
+include(FetchContent)
+FetchContent_Declare(SFML
+        GIT_REPOSITORY https://github.com/SFML/SFML.git
+        GIT_TAG 2.6.x
+        GIT_SHALLOW ON
+        EXCLUDE_FROM_ALL
+        SYSTEM)
+FetchContent_MakeAvailable(SFML)
+
+set(SOURCE_FILES src/3rdparty/stb_image.h
         src/3rdparty/stb_image_write.h
         src/colour.cc
         src/colour.h
@@ -15,6 +22,16 @@ add_executable(approximating_images
         src/image.h
         src/triangulator.cc
         src/triangulator.h)
+
+add_executable(approximating_images
+        src/main.cc
+        ${SOURCE_FILES})
+target_link_libraries(approximating_images PRIVATE sfml-graphics)
+
+add_executable(test
+        src/test.cc
+        ${SOURCE_FILES})
+target_link_libraries(test PRIVATE sfml-graphics)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     set(MACOS TRUE)
