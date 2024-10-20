@@ -16,13 +16,15 @@
 
 __attribute__((noinline))
 void enjoy(const Triangle& triangle, Image<USE_FP16>& img) {
+  auto [r, g, b, a] = triangle.colour;
+  auto rs = ColourVec::all(r) * a, gs = ColourVec::all(g) * a, bs = ColourVec::all(b) * a;
+  auto a_inv = ColourVec::all(1 - a);
   triangle.triangle_for_each_vectorized([&] (LoadedPixelsSet<1, USE_FP16> loaded) {
-    auto [r, g, b, a] = triangle.colour;
     auto [red, green, blue ] = loaded.image_data[0].colours();
     loaded.store_colour<0>(
-      fma(red, ColourVec::all(1 - a), ColourVec::all(r) * a),
-      fma(green, ColourVec::all(1 - a), ColourVec::all(g) * a),
-      fma(blue, ColourVec::all(1 - a), ColourVec::all(b) * a)
+      fma(red, a_inv, rs),
+      fma(green, a_inv, gs),
+      fma(blue, a_inv, bs)
     );
   }, img);
 }
