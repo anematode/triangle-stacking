@@ -11,10 +11,11 @@ __attribute__((noinline))
 void enjoy(const Triangle & triangle, Image & img) {
   triangle.triangle_for_each_vectorized([&] (LoadedPixelsSet<1> loaded) {
     auto [r, g, b, a] = triangle.colour;
+    auto [red, green, blue ] = loaded.image_data[0].colours();
     loaded.store_colour<0>(
-      ColourVec::all(r),
-      ColourVec::all(g),
-      ColourVec::all(b)
+      fma(red, ColourVec::all(1 - a), ColourVec::all(r) * a),
+      fma(green, ColourVec::all(1 - a), ColourVec::all(g) * a),
+      fma(blue, ColourVec::all(1 - a), ColourVec::all(b) * a)
     );
   }, img);
 }
@@ -50,11 +51,18 @@ int main() {
       }
     };
 
+    if (triangle.area() > 1000) {
+      i--;
+      continue;
+    }
+
     enjoy(triangle, img);
 
-    if (i % 100000 == 0) {
+    if (i % 10000 == 0) {
       img.compute_colours();
       img.show(window);
+
+      std::cout << "Triangles/second: " << i / duration_cast<duration<float>>(steady_clock::now() - start).count() << std::endl;
 
       if (Image::poll_events(window)) break;
     }

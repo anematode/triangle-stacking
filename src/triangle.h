@@ -12,6 +12,10 @@ struct LoadedPixels {
   float* __restrict__ red_addr;
   float* __restrict__ green_addr;
   float* __restrict__ blue_addr;
+
+  std::tuple<ColourVec, ColourVec, ColourVec> colours() const {
+    return { red, green, blue };
+  }
 };
 
 template <size_t N_IMAGES>
@@ -65,12 +69,7 @@ struct HalfPlaneCheck {
   }
 
   ColourVec check(ColourVec x, ColourVec y) {
-    ColourVec res = fma(x, A1, fma(y, A2, B));
-#ifdef USE_NEON
-    return { vreinterpretq_f32_s32(vshrq_n_s32(vreinterpretq_s32_f32(res), 31)) };
-#else
-    return { res };
-#endif
+    return { fma(x, A1, fma(y, A2, B)) };
   }
 };
 }
@@ -148,8 +147,8 @@ struct Triangle {
         xxxx += increment_x;
 
 #ifdef USE_NEON
-        auto in_triangle = vandq_u32(vandq_u32(c1, c2), c3);
-        auto early_in_triangle = vaddvq_u32(in_triangle);
+        auto in_triangle = vshrq_n_s32(vreinterpretq_s32_u32(vandq_u32(vandq_u32(c1, c2), c3)), 31);
+        auto early_in_triangle = vaddvq_s32(in_triangle);
 #elif defined(USE_AVX512)
         auto in_triangle = _mm512_movepi32_mask(_mm512_ternarylogic_epi32(
           _mm512_castps_si512(c1), _mm512_castps_si512(c2), _mm512_castps_si512(c3), 0x80));
