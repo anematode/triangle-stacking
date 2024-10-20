@@ -141,7 +141,7 @@ struct ColourMask {
   ColourMask operator|(const ColourMask &other) const {
     return { data | other.data };
   }
-}
+};
 
 struct ColourVec {
   __m512 data;
@@ -153,11 +153,11 @@ struct ColourVec {
     return { _mm512_set1_ps(val) };
   }
   template <typename Ty>
-  static ColourVec load(Ty* ptr) {
+  static ColourVec load(const Ty* ptr) {
     if constexpr (std::is_same_v<Ty, float>)
       return { _mm512_loadu_ps(ptr) };
     else
-      return { _mm512_cvtph_ps(_mm256_loadu_si256(ptr)) };
+      return { _mm512_cvtph_ps(_mm256_loadu_si256((const __m256i*) ptr)) };
   }
   static ColourVec select(ColourMask mask, ColourVec a, ColourVec b) {
     return { _mm512_mask_blend_ps(mask, b.data, a.data) };
@@ -167,7 +167,7 @@ struct ColourVec {
     if constexpr (std::is_same_v<Ty, float>)
       _mm512_storeu_ps(ptr, data);
     else
-      _mm256_storeu_si256(ptr, _mm512_cvtps_ph(data, 0));
+      _mm256_storeu_si256((__m256i*) ptr, _mm512_cvtps_ph(data, 0));
   }
   template <typename Ty>
   void masked_store(Ty* ptr, ColourMask mask) const {
@@ -196,16 +196,16 @@ struct ColourVec {
     return { _mm512_mul_ps(data, _mm512_set1_ps(scalar)) };
   }
   ColourMask operator<(const ColourVec &other) const {
-    return _mm512_cmp_ps_mask(data, other.data, _CMP_LT_OQ);
+    return { _mm512_cmp_ps_mask(data, other.data, _CMP_LT_OQ) };
   }
   ColourMask operator>(const ColourVec &other) const {
-    return _mm512_cmp_ps_mask(data, other.data, _CMP_GT_OQ);
+    return { _mm512_cmp_ps_mask(data, other.data, _CMP_GT_OQ) };
   }
   ColourMask operator>=(const ColourVec &other) const {
-    return _mm512_cmp_ps_mask(data, other.data, _CMP_GE_OQ);
+    return { _mm512_cmp_ps_mask(data, other.data, _CMP_GE_OQ) };
   }
   ColourMask operator<=(const ColourVec &other) const {
-    return _mm512_cmp_ps_mask(data, other.data, _CMP_LE_OQ);
+    return { _mm512_cmp_ps_mask(data, other.data, _CMP_LE_OQ) };
   }
 };
 inline ColourVec sqrt(const ColourVec &vec) {
@@ -412,7 +412,7 @@ Data evaluate_norm(Data r1, Data g1, Data b1, Data r2, Data g2, Data b2) {
       }
     }
   }
-#elif USE_AVX512
+#elif defined(USE_AVX512)
   if constexpr (std::is_same_v<Data, __m512>) {
     __m512 dr = _mm512_sub_ps(r1, r2), dg = _mm512_sub_ps(g1, g2), db = _mm512_sub_ps(b1, b2);
     if (norm == ErrorMetric::L1 || norm == ErrorMetric::L3) {

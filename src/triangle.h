@@ -4,6 +4,7 @@
 #include <numeric>
 #include <string>
 #include <array>
+#include <tuple>
 #include "colour.h"
 
 template <bool USE_FP16>
@@ -184,7 +185,7 @@ struct Triangle {
 #ifdef USE_NEON
         ColourMask in_triangle_mask { vandq_u32(in_triangle, in_bounds) };
 #elif defined(USE_AVX512)
-        ColourMask in_triangle_mask { _mm512_mask_cmp_ps_mask(early_in_triangle, in_triangle, in_bounds, _CMP_LT_OS) };
+        ColourMask in_triangle_mask { _mm512_mask_cmp_ps_mask(early_in_triangle, xxxx, wwww, _CMP_LT_OS) };
 #else
         ColourMask in_triangle_mask { _mm256_and_ps(in_triangle, in_bounds) };
 #endif
