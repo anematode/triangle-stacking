@@ -157,7 +157,7 @@ struct ColourVec {
     if constexpr (std::is_same_v<Ty, float>)
       return { _mm512_loadu_ps(ptr) };
     else
-      _mm512_cvtph_ps(_mm256_loadu_si256(ptr));
+      return { _mm512_cvtph_ps(_mm256_loadu_si256(ptr)) };
   }
   static ColourVec select(ColourMask mask, ColourVec a, ColourVec b) {
     return { _mm512_mask_blend_ps(mask, b.data, a.data) };
@@ -251,11 +251,11 @@ struct ColourVec {
     return { _mm256_set1_ps(val) };
   }
   template <typename Ty>
-  static ColourVec load(Ty* ptr) {
+  static ColourVec load(const Ty* ptr) {
     if constexpr (std::is_same_v<Ty, float>)
       return { _mm256_loadu_ps(ptr) };
     else
-      return _mm256_cvtph_ps(_mm_loadu_si128(ptr));
+      return { _mm256_cvtph_ps(_mm_loadu_si128((const __m128i*) ptr)) };
   }
   static ColourVec select(ColourMask mask, ColourVec a, ColourVec b) {
     return { _mm256_blendv_ps(b.data, a.data, mask.data) };
@@ -265,7 +265,7 @@ struct ColourVec {
     if constexpr (std::is_same_v<Ty, float>)
       _mm256_storeu_ps(ptr, data);
     else
-      _mm_storeu_si128(ptr, _mm256_cvtps_ph(data, 0));
+      _mm_storeu_si128((__m128i*) ptr, _mm256_cvtps_ph(data, 0));
   }
   template <typename Ty>
   void masked_store(Ty* ptr, ColourMask mask) const {

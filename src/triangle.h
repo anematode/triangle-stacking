@@ -45,7 +45,7 @@ struct LoadedPixelsSet {
         _mm512_mask_storeu_ps(addr, valid_mask, vec);
 #else
       if (MustRespectMask)
-        _mm256_storeu_ps(addr, ColourVec::select(valid_mask, vec, original));
+        ColourVec::select(valid_mask, vec, original).store(addr);
 #endif
       else
         vec.store(addr);
