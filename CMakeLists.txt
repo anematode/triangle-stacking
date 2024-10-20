@@ -3,15 +3,6 @@ project(approximating_images)
 
 set(CMAKE_CXX_STANDARD 20)
 
-include(FetchContent)
-FetchContent_Declare(SFML
-        GIT_REPOSITORY https://github.com/SFML/SFML.git
-        GIT_TAG 2.6.x
-        GIT_SHALLOW ON
-        EXCLUDE_FROM_ALL
-        SYSTEM)
-FetchContent_MakeAvailable(SFML)
-
 set(SOURCE_FILES src/3rdparty/stb_image.h
         src/3rdparty/stb_image_write.h
         src/colour.cc
@@ -32,6 +23,15 @@ add_executable(test
 
 if (${NO_SFML})
 else()
+    include(FetchContent)
+    FetchContent_Declare(SFML
+            GIT_REPOSITORY https://github.com/SFML/SFML.git
+            GIT_TAG 2.6.x
+            GIT_SHALLOW ON
+            EXCLUDE_FROM_ALL
+            SYSTEM)
+    FetchContent_MakeAvailable(SFML)
+
     target_link_libraries(approximating_images PRIVATE sfml-graphics)
     target_link_libraries(test PRIVATE sfml-graphics)
 
