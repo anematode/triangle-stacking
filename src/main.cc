@@ -185,6 +185,7 @@ int main(int argc, char **argv) {
   size_t step;
   while ((step = triangulator->triangles.size()) < (size_t)triangulator->steps) {
 #ifdef SFML_SUPPORTED
+    triangulator->assembled.compute_colours();
     triangulator->assembled.show(window);
     if (poll_events(window, false)) return 0;
 #endif

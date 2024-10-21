@@ -45,7 +45,7 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 endif()
 
 if (MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /openmp /Wall /O3")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /openmp /O2 /W4 /arch:AVX2 /MP")
 elseif(MACOS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -ffast-math -mcpu=apple-m1 -openmp -O3 -Xclang -fopenmp -L/opt/homebrew/opt/libomp/lib -I/opt/homebrew/opt/libomp/include -lomp -g")
 else() # Linux

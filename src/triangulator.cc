@@ -13,7 +13,7 @@ BatchEvaluationResults evaluate_triangle_batched(
   std::vector<long> pixel_counts(candidates.size());
 
 #pragma omp parallel for
-  for (size_t i = 0; i < candidates.size(); ++i) {
+  for (int i = 0; i < candidates.size(); ++i) {
     TriangleEvaluationResult result{};
 
 #define CASE(N) case N: \
@@ -53,7 +53,7 @@ std::vector<Triangle> generate_random_candidates(size_t iterations, float W, flo
   std::vector<Triangle> candidates{iterations};
 
 #pragma omp parallel for
-  for (size_t i = 0; i < iterations; ++i) {
+  for (int i = 0; i < iterations; ++i) {
     Triangle &can = candidates[i];
     do {
       const float x1 = rng.next(i) * W, y1 = rng.next(i) * H;
@@ -226,7 +226,7 @@ bool Triangulator::perturb_single(size_t i) {
     std::vector<float> improvements(S, 0.0);
 
 #pragma omp parallel for
-    for (size_t i = 0; i < S; ++i) {
+    for (int i = 0; i < S; ++i) {
       auto triangle = perturbed[i];
       float improvement = 0.0;
 
@@ -320,6 +320,7 @@ void Triangulator::load_save_state(const std::string &path) {
 void Triangulator::assemble(Colour background) {
   assembled = Image{target.width, target.height};
   std::fill(assembled.colours.begin(), assembled.colours.end(), background);
+  assembled.compute_channels();
   for (const auto &triangle: triangles)
     assembled.draw_triangle(triangle);
   assembled.compute_colours();

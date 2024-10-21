@@ -14,7 +14,7 @@
 #define SHOW_IMAGE false
 #endif
 
-__attribute__((noinline))
+// __attribute__((noinline))
 void enjoy(const Triangle& triangle, Image<USE_FP16>& img) {
   auto [r, g, b, a] = triangle.colour;
   auto rs = ColourVec::all(r) * a, gs = ColourVec::all(g) * a, bs = ColourVec::all(b) * a;

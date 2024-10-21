@@ -7,15 +7,22 @@
 #include <tuple>
 #include "colour.h"
 
+// if msvc define restrict to be nothing
+#ifdef _MSC_VER
+#define RESTRICT
+#else
+#define RESTRICT __restrict__
+#endif
+
 template <bool USE_FP16>
 struct LoadedPixels {
   ColourVec red, green, blue;
 
   using ColourTy = std::conditional_t<USE_FP16, unsigned short, float>;
 
-  ColourTy* __restrict__ red_addr;
-  ColourTy* __restrict__ green_addr;
-  ColourTy* __restrict__ blue_addr;
+  ColourTy* RESTRICT red_addr;
+  ColourTy* RESTRICT green_addr;
+  ColourTy* RESTRICT blue_addr;
 
   std::tuple<ColourVec, ColourVec, ColourVec> colours() const {
     return { red, green, blue };

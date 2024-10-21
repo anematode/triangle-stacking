@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <numeric>
 
 #ifdef __ARM_NEON__
 #define USE_NEON
@@ -148,7 +149,7 @@ struct ColourMask {
     return { data | other.data };
   }
   unsigned popcount() const {
-    return __builtin_popcount(data);
+    return std::popcount((unsigned)data);
   }
 };
 
@@ -252,7 +253,7 @@ struct ColourMask {
     return _mm256_movemask_ps(data) & (1 << i);
   }
   unsigned popcount() const {
-    return __builtin_popcount(_mm256_movemask_ps(data));
+    return std::popcount((unsigned)_mm256_movemask_ps(data));
   }
 };
 
@@ -327,7 +328,7 @@ struct ColourVec {
     return s[0] + s[1] + s[2] + s[3] + s[4] + s[5] + s[6] + s[7];
   }
   unsigned popcount() const {
-    return __builtin_popcount(_mm256_movemask_ps(data));
+    return std::popcount((unsigned)_mm256_movemask_ps(data));
   }
 };
 inline ColourVec sqrt(const ColourVec &vec) {
