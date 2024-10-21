@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
-#include <numeric>
+#include <bit>
 
 #ifdef __ARM_NEON__
 #define USE_NEON
